@@ -5,7 +5,7 @@
 /// ## Quick Start
 ///
 /// ```dart
-/// import 'package:mostly_good_metrics/mostly_good_metrics.dart';
+/// import 'package:mostly_good_metrics_flutter/mostly_good_metrics_flutter.dart';
 ///
 /// // Initialize the SDK
 /// await MostlyGoodMetrics.configure(
@@ -21,7 +21,7 @@
 /// // Identify users
 /// MostlyGoodMetrics.identify('user-123');
 /// ```
-library mostly_good_metrics;
+library mostly_good_metrics_flutter;
 
 export 'src/mostly_good_metrics.dart' show MostlyGoodMetrics;
 export 'src/types.dart'

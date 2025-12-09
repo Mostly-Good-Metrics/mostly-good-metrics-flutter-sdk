@@ -1,6 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:mostly_good_metrics/mostly_good_metrics.dart';
+import 'package:mostly_good_metrics_flutter/mostly_good_metrics_flutter.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();

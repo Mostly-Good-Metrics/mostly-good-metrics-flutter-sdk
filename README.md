@@ -24,7 +24,7 @@ Add the package to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  mostly_good_metrics: ^0.0.1
+  mostly_good_metrics_flutter: ^0.1.0
 ```
 
 Then run:
@@ -41,7 +41,7 @@ Initialize once at app startup (typically in `main.dart`):
 
 ```dart
 import 'package:flutter/material.dart';
-import 'package:mostly_good_metrics/mostly_good_metrics.dart';
+import 'package:mostly_good_metrics_flutter/mostly_good_metrics_flutter.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();

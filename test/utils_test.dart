@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mostly_good_metrics/src/utils.dart';
+import 'package:mostly_good_metrics_flutter/src/utils.dart';
 
 void main() {
   group('MGMUtils.validateEventName', () {

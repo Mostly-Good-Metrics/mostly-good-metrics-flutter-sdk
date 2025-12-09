@@ -11,7 +11,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  mostly_good_metrics:
+  mostly_good_metrics_flutter:
     path: ../
 
 dev_dependencies:
