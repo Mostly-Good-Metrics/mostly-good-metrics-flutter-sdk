@@ -1,0 +1,270 @@
+/// Configuration options for the MostlyGoodMetrics SDK.
+class MGMConfiguration {
+  /// The API key for authenticating with MostlyGoodMetrics.
+  final String apiKey;
+
+  /// The base URL for the MostlyGoodMetrics API.
+  final String baseUrl;
+
+  /// The environment name (e.g., 'production', 'staging', 'development').
+  final String environment;
+
+  /// The version of your application.
+  final String? appVersion;
+
+  /// Maximum number of events to send in a single batch.
+  final int maxBatchSize;
+
+  /// Interval in seconds between automatic event flushes.
+  final int flushInterval;
+
+  /// Maximum number of events to store locally.
+  final int maxStoredEvents;
+
+  /// Whether to enable debug logging.
+  final bool enableDebugLogging;
+
+  /// Whether to automatically track app lifecycle events.
+  final bool trackAppLifecycleEvents;
+
+  /// Creates a new configuration for MostlyGoodMetrics.
+  const MGMConfiguration({
+    required this.apiKey,
+    this.baseUrl = 'https://mostlygoodmetrics.com',
+    this.environment = 'production',
+    this.appVersion,
+    this.maxBatchSize = 100,
+    this.flushInterval = 30,
+    this.maxStoredEvents = 10000,
+    this.enableDebugLogging = false,
+    this.trackAppLifecycleEvents = true,
+  })  : assert(maxBatchSize >= 1 && maxBatchSize <= 1000),
+        assert(flushInterval >= 1),
+        assert(maxStoredEvents >= 100);
+
+  /// Creates a copy of this configuration with the given fields replaced.
+  MGMConfiguration copyWith({
+    String? apiKey,
+    String? baseUrl,
+    String? environment,
+    String? appVersion,
+    int? maxBatchSize,
+    int? flushInterval,
+    int? maxStoredEvents,
+    bool? enableDebugLogging,
+    bool? trackAppLifecycleEvents,
+  }) {
+    return MGMConfiguration(
+      apiKey: apiKey ?? this.apiKey,
+      baseUrl: baseUrl ?? this.baseUrl,
+      environment: environment ?? this.environment,
+      appVersion: appVersion ?? this.appVersion,
+      maxBatchSize: maxBatchSize ?? this.maxBatchSize,
+      flushInterval: flushInterval ?? this.flushInterval,
+      maxStoredEvents: maxStoredEvents ?? this.maxStoredEvents,
+      enableDebugLogging: enableDebugLogging ?? this.enableDebugLogging,
+      trackAppLifecycleEvents:
+          trackAppLifecycleEvents ?? this.trackAppLifecycleEvents,
+    );
+  }
+}
+
+/// Represents an analytics event to be tracked.
+class MGMEvent {
+  /// The name of the event.
+  final String name;
+
+  /// The timestamp when the event occurred.
+  final DateTime timestamp;
+
+  /// Optional user identifier.
+  final String? userId;
+
+  /// Session identifier.
+  final String? sessionId;
+
+  /// The platform where the event occurred.
+  final String platform;
+
+  /// The app version.
+  final String? appVersion;
+
+  /// The OS version.
+  final String? osVersion;
+
+  /// The environment (production, staging, etc.).
+  final String environment;
+
+  /// Custom properties attached to the event.
+  final Map<String, dynamic>? properties;
+
+  /// Creates a new event.
+  const MGMEvent({
+    required this.name,
+    required this.timestamp,
+    this.userId,
+    this.sessionId,
+    required this.platform,
+    this.appVersion,
+    this.osVersion,
+    required this.environment,
+    this.properties,
+  });
+
+  /// Creates an event from a JSON map.
+  factory MGMEvent.fromJson(Map<String, dynamic> json) {
+    return MGMEvent(
+      name: json['name'] as String,
+      timestamp: DateTime.parse(json['timestamp'] as String),
+      userId: json['userId'] as String?,
+      sessionId: json['sessionId'] as String?,
+      platform: json['platform'] as String,
+      appVersion: json['appVersion'] as String?,
+      osVersion: json['osVersion'] as String?,
+      environment: json['environment'] as String,
+      properties: json['properties'] as Map<String, dynamic>?,
+    );
+  }
+
+  /// Converts this event to a JSON map.
+  Map<String, dynamic> toJson() {
+    return {
+      'name': name,
+      'timestamp': timestamp.toUtc().toIso8601String(),
+      if (userId != null) 'userId': userId,
+      if (sessionId != null) 'sessionId': sessionId,
+      'platform': platform,
+      if (appVersion != null) 'appVersion': appVersion,
+      if (osVersion != null) 'osVersion': osVersion,
+      'environment': environment,
+      if (properties != null) 'properties': properties,
+    };
+  }
+}
+
+/// Represents the payload sent to the API.
+class EventsPayload {
+  /// The list of events to send.
+  final List<MGMEvent> events;
+
+  /// Context information shared across events.
+  final EventContext context;
+
+  /// Creates a new events payload.
+  const EventsPayload({
+    required this.events,
+    required this.context,
+  });
+
+  /// Converts this payload to a JSON map.
+  Map<String, dynamic> toJson() {
+    return {
+      'events': events.map((e) => e.toJson()).toList(),
+      'context': context.toJson(),
+    };
+  }
+}
+
+/// Context information shared across events in a batch.
+class EventContext {
+  /// The platform where events occurred.
+  final String platform;
+
+  /// The app version.
+  final String? appVersion;
+
+  /// The OS version.
+  final String? osVersion;
+
+  /// The user identifier.
+  final String? userId;
+
+  /// The session identifier.
+  final String? sessionId;
+
+  /// The environment.
+  final String environment;
+
+  /// Creates a new event context.
+  const EventContext({
+    required this.platform,
+    this.appVersion,
+    this.osVersion,
+    this.userId,
+    this.sessionId,
+    required this.environment,
+  });
+
+  /// Converts this context to a JSON map.
+  Map<String, dynamic> toJson() {
+    return {
+      'platform': platform,
+      if (appVersion != null) 'appVersion': appVersion,
+      if (osVersion != null) 'osVersion': osVersion,
+      if (userId != null) 'userId': userId,
+      if (sessionId != null) 'sessionId': sessionId,
+      'environment': environment,
+    };
+  }
+}
+
+/// Error types that can occur in the SDK.
+enum MGMErrorType {
+  /// The SDK has not been configured.
+  notConfigured,
+
+  /// Invalid event name.
+  invalidEventName,
+
+  /// Invalid properties.
+  invalidProperties,
+
+  /// Network error.
+  networkError,
+
+  /// Storage error.
+  storageError,
+
+  /// Rate limited by the API.
+  rateLimited,
+
+  /// Unknown error.
+  unknown,
+}
+
+/// Represents an error from the SDK.
+class MGMError implements Exception {
+  /// The type of error.
+  final MGMErrorType type;
+
+  /// A human-readable error message.
+  final String message;
+
+  /// The underlying error, if any.
+  final Object? underlyingError;
+
+  /// Creates a new SDK error.
+  const MGMError({
+    required this.type,
+    required this.message,
+    this.underlyingError,
+  });
+
+  @override
+  String toString() => 'MGMError(${type.name}): $message';
+}
+
+/// Result of sending events to the API.
+enum SendResult {
+  /// Events were sent successfully.
+  success,
+
+  /// Events were partially sent.
+  partialSuccess,
+
+  /// Failed to send events.
+  failure,
+
+  /// Rate limited - should retry later.
+  rateLimited,
+}
