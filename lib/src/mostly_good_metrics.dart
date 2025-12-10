@@ -193,6 +193,9 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
       appVersion: mgm._config!.appVersion,
       osVersion: MGMUtils.getOSVersion(),
       environment: mgm._config!.environment,
+      deviceManufacturer: MGMUtils.getDeviceManufacturer(),
+      locale: MGMUtils.getLocale(),
+      timezone: MGMUtils.getTimezone(),
       properties: properties,
     );
 
@@ -308,6 +311,9 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
         userId: _userId,
         sessionId: _sessionId,
         environment: _config!.environment,
+        deviceManufacturer: MGMUtils.getDeviceManufacturer(),
+        locale: MGMUtils.getLocale(),
+        timezone: MGMUtils.getTimezone(),
       ),
     );
 

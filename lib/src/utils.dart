@@ -116,4 +116,33 @@ class MGMUtils {
 
     return Platform.operatingSystemVersion;
   }
+
+  /// Gets the user's locale (e.g., "en_US").
+  static String getLocale() {
+    return Platform.localeName;
+  }
+
+  /// Gets the user's timezone name.
+  /// Note: This returns the offset-based name (e.g., "EST" or "UTC+5"),
+  /// not the IANA timezone. For IANA names, use the intl package.
+  static String getTimezone() {
+    return DateTime.now().timeZoneName;
+  }
+
+  /// Gets the device manufacturer.
+  /// Returns "Apple" for iOS/macOS, or null for other platforms
+  /// (Android requires platform channel for Build.MANUFACTURER).
+  static String? getDeviceManufacturer() {
+    if (kIsWeb) {
+      return null;
+    }
+
+    if (Platform.isIOS || Platform.isMacOS) {
+      return 'Apple';
+    }
+
+    // For Android, this would require a platform channel to access Build.MANUFACTURER
+    // Returning null here since we don't want to add platform channel complexity
+    return null;
+  }
 }

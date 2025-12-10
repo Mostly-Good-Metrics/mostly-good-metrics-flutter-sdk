@@ -89,11 +89,23 @@ class MGMEvent {
   /// The app version.
   final String? appVersion;
 
+  /// The app build number (separate from version).
+  final String? appBuildNumber;
+
   /// The OS version.
   final String? osVersion;
 
   /// The environment (production, staging, etc.).
   final String environment;
+
+  /// The device manufacturer (e.g., "Apple", "Samsung").
+  final String? deviceManufacturer;
+
+  /// The user's locale (e.g., "en_US").
+  final String? locale;
+
+  /// The user's timezone (e.g., "America/New_York").
+  final String? timezone;
 
   /// Custom properties attached to the event.
   final Map<String, dynamic>? properties;
@@ -106,8 +118,12 @@ class MGMEvent {
     this.sessionId,
     required this.platform,
     this.appVersion,
+    this.appBuildNumber,
     this.osVersion,
     required this.environment,
+    this.deviceManufacturer,
+    this.locale,
+    this.timezone,
     this.properties,
   });
 
@@ -120,8 +136,12 @@ class MGMEvent {
       sessionId: json['sessionId'] as String?,
       platform: json['platform'] as String,
       appVersion: json['appVersion'] as String?,
+      appBuildNumber: json['appBuildNumber'] as String?,
       osVersion: json['osVersion'] as String?,
       environment: json['environment'] as String,
+      deviceManufacturer: json['deviceManufacturer'] as String?,
+      locale: json['locale'] as String?,
+      timezone: json['timezone'] as String?,
       properties: json['properties'] as Map<String, dynamic>?,
     );
   }
@@ -135,8 +155,12 @@ class MGMEvent {
       if (sessionId != null) 'sessionId': sessionId,
       'platform': platform,
       if (appVersion != null) 'appVersion': appVersion,
+      if (appBuildNumber != null) 'appBuildNumber': appBuildNumber,
       if (osVersion != null) 'osVersion': osVersion,
       'environment': environment,
+      if (deviceManufacturer != null) 'deviceManufacturer': deviceManufacturer,
+      if (locale != null) 'locale': locale,
+      if (timezone != null) 'timezone': timezone,
       if (properties != null) 'properties': properties,
     };
   }
@@ -173,6 +197,9 @@ class EventContext {
   /// The app version.
   final String? appVersion;
 
+  /// The app build number.
+  final String? appBuildNumber;
+
   /// The OS version.
   final String? osVersion;
 
@@ -185,14 +212,27 @@ class EventContext {
   /// The environment.
   final String environment;
 
+  /// The device manufacturer.
+  final String? deviceManufacturer;
+
+  /// The user's locale.
+  final String? locale;
+
+  /// The user's timezone.
+  final String? timezone;
+
   /// Creates a new event context.
   const EventContext({
     required this.platform,
     this.appVersion,
+    this.appBuildNumber,
     this.osVersion,
     this.userId,
     this.sessionId,
     required this.environment,
+    this.deviceManufacturer,
+    this.locale,
+    this.timezone,
   });
 
   /// Converts this context to a JSON map.
@@ -200,10 +240,14 @@ class EventContext {
     return {
       'platform': platform,
       if (appVersion != null) 'appVersion': appVersion,
+      if (appBuildNumber != null) 'appBuildNumber': appBuildNumber,
       if (osVersion != null) 'osVersion': osVersion,
       if (userId != null) 'userId': userId,
       if (sessionId != null) 'sessionId': sessionId,
       'environment': environment,
+      if (deviceManufacturer != null) 'deviceManufacturer': deviceManufacturer,
+      if (locale != null) 'locale': locale,
+      if (timezone != null) 'timezone': timezone,
     };
   }
 }
