@@ -83,8 +83,8 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
     MGMLogger.debug('Configuring MostlyGoodMetrics SDK');
 
     // Initialize storage
-    mgm._eventStorage =
-        eventStorage ?? FileEventStorage(maxStoredEvents: config.maxStoredEvents);
+    mgm._eventStorage = eventStorage ??
+        FileEventStorage(maxStoredEvents: config.maxStoredEvents);
     mgm._stateStorage = stateStorage ?? PreferencesStateStorage();
     mgm._networkClient = networkClient ?? HttpNetworkClient();
 
@@ -134,10 +134,13 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
     } else if (storedVersion != currentVersion) {
       // App updated
       if (_config!.trackAppLifecycleEvents) {
-        track(r'$app_updated', properties: {
-          'previous_version': storedVersion,
-          'current_version': currentVersion,
-        },);
+        track(
+          r'$app_updated',
+          properties: {
+            'previous_version': storedVersion,
+            'current_version': currentVersion,
+          },
+        );
       }
     }
 

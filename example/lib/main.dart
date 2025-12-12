@@ -286,7 +286,6 @@ class _HomePageState extends State<HomePage> {
                       style: Theme.of(context).textTheme.titleLarge,
                     ),
                     const SizedBox(height: 8),
-
                     ElevatedButton.icon(
                       onPressed: () async {
                         await MostlyGoodMetrics.flush();
@@ -297,7 +296,6 @@ class _HomePageState extends State<HomePage> {
                       label: const Text('Flush Events'),
                     ),
                     const SizedBox(height: 8),
-
                     ElevatedButton.icon(
                       onPressed: () async {
                         await MostlyGoodMetrics.startNewSession();
@@ -308,7 +306,6 @@ class _HomePageState extends State<HomePage> {
                       label: const Text('Start New Session'),
                     ),
                     const SizedBox(height: 8),
-
                     OutlinedButton.icon(
                       onPressed: () async {
                         final confirm = await showDialog<bool>(
@@ -364,7 +361,6 @@ class _HomePageState extends State<HomePage> {
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                     const SizedBox(height: 8),
-
                     ElevatedButton.icon(
                       onPressed: () {
                         for (var i = 0; i < 10; i++) {
@@ -380,7 +376,6 @@ class _HomePageState extends State<HomePage> {
                       label: const Text('Track 10 Events'),
                     ),
                     const SizedBox(height: 8),
-
                     ElevatedButton.icon(
                       onPressed: () {
                         for (var i = 0; i < 100; i++) {

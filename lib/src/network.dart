@@ -109,7 +109,8 @@ class HttpNetworkClient implements NetworkClient {
         _retryAfterTime = DateTime.now().add(
           Duration(seconds: retryAfterSeconds),
         );
-        MGMLogger.warning('Rate limited, retry after $retryAfterSeconds seconds');
+        MGMLogger.warning(
+            'Rate limited, retry after $retryAfterSeconds seconds');
         return;
       }
     }

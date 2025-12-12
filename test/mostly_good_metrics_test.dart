@@ -61,7 +61,8 @@ void main() {
       expect(events[0].name, r'$app_opened');
     });
 
-    test(r'does not track $app_opened when lifecycle events disabled', () async {
+    test(r'does not track $app_opened when lifecycle events disabled',
+        () async {
       await configureSDK(trackLifecycleEvents: false);
 
       final count = await eventStorage.eventCount();
@@ -102,11 +103,14 @@ void main() {
     test('tracks event with properties', () async {
       await configureSDK();
 
-      MostlyGoodMetrics.track('purchase', properties: {
-        'product_id': 'abc123',
-        'price': 9.99,
-        'currency': 'USD',
-      },);
+      MostlyGoodMetrics.track(
+        'purchase',
+        properties: {
+          'product_id': 'abc123',
+          'price': 9.99,
+          'currency': 'USD',
+        },
+      );
 
       final events = await eventStorage.fetchEvents(1);
       expect(events[0].name, 'purchase');
@@ -177,15 +181,18 @@ void main() {
       await configureSDK();
 
       expect(
-        () => MostlyGoodMetrics.track('test', properties: {
-          'l1': {
-            'l2': {
-              'l3': {
-                'l4': 'too deep',
+        () => MostlyGoodMetrics.track(
+          'test',
+          properties: {
+            'l1': {
+              'l2': {
+                'l3': {
+                  'l4': 'too deep',
+                },
               },
             },
           },
-        },),
+        ),
         throwsA(
           isA<MGMError>().having(
             (e) => e.type,
@@ -381,8 +388,14 @@ void main() {
       final after = DateTime.now();
       final events = await eventStorage.fetchEvents(1);
 
-      expect(events[0].timestamp.isAfter(before.subtract(const Duration(seconds: 1))), true);
-      expect(events[0].timestamp.isBefore(after.add(const Duration(seconds: 1))), true);
+      expect(
+          events[0]
+              .timestamp
+              .isAfter(before.subtract(const Duration(seconds: 1))),
+          true);
+      expect(
+          events[0].timestamp.isBefore(after.add(const Duration(seconds: 1))),
+          true);
     });
   });
 }

@@ -137,7 +137,9 @@ void main() {
         'appVersion': '3.0.0',
         'osVersion': '14.0',
         'environment': 'development',
-        'properties': {'nested': {'key': 'value'}},
+        'properties': {
+          'nested': {'key': 'value'}
+        },
       };
 
       final event = MGMEvent.fromJson(json);
@@ -150,7 +152,9 @@ void main() {
       expect(event.appVersion, '3.0.0');
       expect(event.osVersion, '14.0');
       expect(event.environment, 'development');
-      expect(event.properties, {'nested': {'key': 'value'}});
+      expect(event.properties, {
+        'nested': {'key': 'value'}
+      });
     });
 
     test('roundtrip serialization works', () {

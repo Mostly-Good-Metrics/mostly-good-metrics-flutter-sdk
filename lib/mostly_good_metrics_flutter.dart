@@ -41,4 +41,5 @@ export 'src/storage.dart'
         PreferencesStateStorage,
         InMemoryEventStorage,
         InMemoryStateStorage;
-export 'src/network.dart' show NetworkClient, HttpNetworkClient, MockNetworkClient;
+export 'src/network.dart'
+    show NetworkClient, HttpNetworkClient, MockNetworkClient;
