@@ -138,7 +138,7 @@ void main() {
         'osVersion': '14.0',
         'environment': 'development',
         'properties': {
-          'nested': {'key': 'value'}
+          'nested': {'key': 'value'},
         },
       };
 
@@ -153,7 +153,7 @@ void main() {
       expect(event.osVersion, '14.0');
       expect(event.environment, 'development');
       expect(event.properties, {
-        'nested': {'key': 'value'}
+        'nested': {'key': 'value'},
       });
     });
 

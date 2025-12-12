@@ -389,13 +389,15 @@ void main() {
       final events = await eventStorage.fetchEvents(1);
 
       expect(
-          events[0]
-              .timestamp
-              .isAfter(before.subtract(const Duration(seconds: 1))),
-          true);
+        events[0]
+            .timestamp
+            .isAfter(before.subtract(const Duration(seconds: 1))),
+        true,
+      );
       expect(
-          events[0].timestamp.isBefore(after.add(const Duration(seconds: 1))),
-          true);
+        events[0].timestamp.isBefore(after.add(const Duration(seconds: 1))),
+        true,
+      );
     });
   });
 }
