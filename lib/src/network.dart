@@ -58,7 +58,7 @@ class HttpNetworkClient implements NetworkClient {
         headers: {
           'Content-Type': 'application/json',
           'X-MGM-Key': config.apiKey,
-          'User-Agent': 'MostlyGoodMetrics-Flutter/0.1.0',
+          'User-Agent': 'MostlyGoodMetrics-Flutter/0.1.1',
         },
         body: body,
       );
