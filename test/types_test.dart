@@ -179,6 +179,95 @@ void main() {
       expect(deserialized.environment, original.environment);
       expect(deserialized.properties, original.properties);
     });
+
+    test('creates event with new device properties', () {
+      final timestamp = DateTime.now();
+      final event = MGMEvent(
+        name: 'test_event',
+        timestamp: timestamp,
+        platform: 'ios',
+        environment: 'production',
+        appVersion: '1.2.3',
+        appBuildNumber: '42',
+        deviceManufacturer: 'Apple',
+        locale: 'en_US',
+        timezone: 'America/New_York',
+      );
+
+      expect(event.appVersion, '1.2.3');
+      expect(event.appBuildNumber, '42');
+      expect(event.deviceManufacturer, 'Apple');
+      expect(event.locale, 'en_US');
+      expect(event.timezone, 'America/New_York');
+    });
+
+    test('toJson includes new device properties', () {
+      final timestamp = DateTime.utc(2024, 1, 15, 12, 30, 45);
+      final event = MGMEvent(
+        name: 'test_event',
+        timestamp: timestamp,
+        platform: 'android',
+        environment: 'production',
+        appVersion: '1.2.3',
+        appBuildNumber: '42',
+        deviceManufacturer: 'Samsung',
+        locale: 'fr_FR',
+        timezone: 'Europe/Paris',
+      );
+
+      final json = event.toJson();
+
+      expect(json['appVersion'], '1.2.3');
+      expect(json['appBuildNumber'], '42');
+      expect(json['deviceManufacturer'], 'Samsung');
+      expect(json['locale'], 'fr_FR');
+      expect(json['timezone'], 'Europe/Paris');
+    });
+
+    test('fromJson deserializes new device properties', () {
+      final json = {
+        'name': 'deserialized_event',
+        'timestamp': '2024-01-15T10:00:00.000Z',
+        'platform': 'android',
+        'environment': 'production',
+        'appVersion': '2.0.0',
+        'appBuildNumber': '123',
+        'deviceManufacturer': 'Google',
+        'locale': 'de_DE',
+        'timezone': 'Europe/Berlin',
+      };
+
+      final event = MGMEvent.fromJson(json);
+
+      expect(event.appVersion, '2.0.0');
+      expect(event.appBuildNumber, '123');
+      expect(event.deviceManufacturer, 'Google');
+      expect(event.locale, 'de_DE');
+      expect(event.timezone, 'Europe/Berlin');
+    });
+
+    test('roundtrip serialization preserves new device properties', () {
+      final original = MGMEvent(
+        name: 'roundtrip_event',
+        timestamp: DateTime.utc(2024, 6, 1, 15, 30),
+        platform: 'ios',
+        environment: 'production',
+        appVersion: '1.2.3',
+        appBuildNumber: '42',
+        deviceManufacturer: 'Apple',
+        locale: 'en_US',
+        timezone: 'America/New_York',
+      );
+
+      final json = original.toJson();
+      final deserialized = MGMEvent.fromJson(json);
+
+      expect(deserialized.appVersion, original.appVersion);
+      expect(deserialized.appBuildNumber, original.appBuildNumber);
+      expect(deserialized.deviceManufacturer, original.deviceManufacturer);
+      expect(deserialized.locale, original.locale);
+      expect(deserialized.timezone, original.timezone);
+    });
   });
 
   group('EventsPayload', () {
@@ -214,6 +303,60 @@ void main() {
       expect((json['events'] as List).length, 2);
       expect(json['context']['platform'], 'ios');
       expect(json['context']['appVersion'], '1.0.0');
+    });
+  });
+
+  group('EventContext', () {
+    test('creates with new device properties', () {
+      const context = EventContext(
+        platform: 'ios',
+        appVersion: '1.2.3',
+        appBuildNumber: '42',
+        environment: 'production',
+        deviceManufacturer: 'Apple',
+        locale: 'en_US',
+        timezone: 'America/New_York',
+      );
+
+      expect(context.appVersion, '1.2.3');
+      expect(context.appBuildNumber, '42');
+      expect(context.deviceManufacturer, 'Apple');
+      expect(context.locale, 'en_US');
+      expect(context.timezone, 'America/New_York');
+    });
+
+    test('toJson includes new device properties', () {
+      const context = EventContext(
+        platform: 'android',
+        appVersion: '2.0.0',
+        appBuildNumber: '100',
+        environment: 'staging',
+        deviceManufacturer: 'Samsung',
+        locale: 'fr_FR',
+        timezone: 'Europe/Paris',
+      );
+
+      final json = context.toJson();
+
+      expect(json['appVersion'], '2.0.0');
+      expect(json['appBuildNumber'], '100');
+      expect(json['deviceManufacturer'], 'Samsung');
+      expect(json['locale'], 'fr_FR');
+      expect(json['timezone'], 'Europe/Paris');
+    });
+
+    test('toJson excludes null device properties', () {
+      const context = EventContext(
+        platform: 'ios',
+        environment: 'production',
+      );
+
+      final json = context.toJson();
+
+      expect(json.containsKey('appBuildNumber'), false);
+      expect(json.containsKey('deviceManufacturer'), false);
+      expect(json.containsKey('locale'), false);
+      expect(json.containsKey('timezone'), false);
     });
   });
 
