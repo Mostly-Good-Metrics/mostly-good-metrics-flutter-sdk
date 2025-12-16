@@ -16,8 +16,10 @@ jobs:
         with:
           ref: ${{ github.event.release.tag_name }}
 
-      - name: Setup Dart
-        uses: dart-lang/setup-dart@v1
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.x'
 
       - name: Publish to pub.dev
-        run: dart pub publish --force
+        run: flutter pub publish --force
