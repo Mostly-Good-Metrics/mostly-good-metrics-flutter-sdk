@@ -9,12 +9,12 @@ void main() {
       storage = InMemoryEventStorage();
     });
 
-    int _eventCounter = 0;
+    int eventCounter = 0;
     MGMEvent createTestEvent(String name) {
-      _eventCounter++;
+      eventCounter++;
       return MGMEvent(
         name: name,
-        clientEventId: '550e8400-e29b-41d4-a716-44665544000$_eventCounter',
+        clientEventId: '550e8400-e29b-41d4-a716-44665544000$eventCounter',
         timestamp: DateTime.now(),
         platform: 'test',
         environment: 'test',
