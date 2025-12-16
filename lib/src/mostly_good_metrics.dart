@@ -131,7 +131,7 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
         _superProperties =
             Map<String, dynamic>.from(json.decode(superPropsJson) as Map);
         MGMLogger.debug(
-            'Restored super properties: ${_superProperties.keys.join(', ')}');
+            'Restored super properties: ${_superProperties.keys.join(', ')}',);
       } catch (e) {
         MGMLogger.warning('Failed to restore super properties: $e');
         _superProperties = {};
@@ -209,7 +209,7 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
 
     // Validate merged properties
     final propsError = MGMUtils.validateProperties(
-        mergedProperties.isEmpty ? null : mergedProperties);
+        mergedProperties.isEmpty ? null : mergedProperties,);
     if (propsError != null) {
       throw MGMError(
         type: MGMErrorType.invalidProperties,
