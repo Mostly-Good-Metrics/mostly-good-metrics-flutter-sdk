@@ -5,6 +5,10 @@ import 'package:http/http.dart' as http;
 
 import 'logger.dart';
 import 'types.dart';
+import 'utils.dart';
+
+/// SDK version for metrics headers
+const String sdkVersion = '0.1.1';
 
 /// Abstract interface for the network client.
 abstract class NetworkClient {
@@ -53,12 +57,18 @@ class HttpNetworkClient implements NetworkClient {
     MGMLogger.debug('Sending ${payload.events.length} events to $url');
 
     try {
+      final osVersion = MGMUtils.getOSVersion();
       final response = await _client.post(
         url,
         headers: {
           'Content-Type': 'application/json',
           'X-MGM-Key': config.apiKey,
-          'User-Agent': 'MostlyGoodMetrics-Flutter/0.1.1',
+          'User-Agent': 'MostlyGoodMetrics-Flutter/$sdkVersion',
+          // SDK identification headers for metrics
+          'X-MGM-SDK': 'flutter',
+          'X-MGM-SDK-Version': sdkVersion,
+          'X-MGM-Platform': MGMUtils.getPlatformName(),
+          if (osVersion != null) 'X-MGM-Platform-Version': osVersion,
         },
         body: body,
       );
