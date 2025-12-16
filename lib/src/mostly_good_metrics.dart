@@ -299,7 +299,8 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
   ///
   /// Super properties are persisted across app launches.
   static Future<void> setSuperProperties(
-      Map<String, dynamic> properties) async {
+    Map<String, dynamic> properties,
+  ) async {
     _ensureConfigured();
 
     final mgm = instance;
