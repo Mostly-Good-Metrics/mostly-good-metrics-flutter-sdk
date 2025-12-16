@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/widgets.dart';
 
@@ -44,6 +45,10 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
   static const String _userIdKey = 'userId';
   static const String _sessionIdKey = 'sessionId';
   static const String _appVersionKey = 'appVersion';
+  static const String _superPropertiesKey = 'superProperties';
+
+  // In-memory cache for super properties
+  Map<String, dynamic> _superProperties = {};
 
   MostlyGoodMetrics._internal();
 
@@ -118,6 +123,21 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
   Future<void> _restoreState() async {
     _userId = await _stateStorage!.getString(_userIdKey);
     MGMLogger.debug('Restored userId: $_userId');
+
+    // Restore super properties
+    final superPropsJson = await _stateStorage!.getString(_superPropertiesKey);
+    if (superPropsJson != null) {
+      try {
+        _superProperties =
+            Map<String, dynamic>.from(json.decode(superPropsJson) as Map);
+        MGMLogger.debug(
+          'Restored super properties: ${_superProperties.keys.join(', ')}',
+        );
+      } catch (e) {
+        MGMLogger.warning('Failed to restore super properties: $e');
+        _superProperties = {};
+      }
+    }
   }
 
   Future<void> _checkAppVersionChange() async {
@@ -163,6 +183,9 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
   /// Optional [properties] can be provided as a map of key-value pairs.
   /// Properties can be nested up to 3 levels deep.
   ///
+  /// Super properties are automatically merged with event properties.
+  /// Event properties override super properties if there's a key conflict.
+  ///
   /// Throws [MGMError] if the SDK is not configured or if validation fails.
   static void track(String name, {Map<String, dynamic>? properties}) {
     _ensureConfigured();
@@ -178,8 +201,17 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
       );
     }
 
-    // Validate properties
-    final propsError = MGMUtils.validateProperties(properties);
+    // Merge properties: super properties < event properties
+    // Event properties override super properties
+    final mergedProperties = <String, dynamic>{
+      ...mgm._superProperties,
+      if (properties != null) ...properties,
+    };
+
+    // Validate merged properties
+    final propsError = MGMUtils.validateProperties(
+      mergedProperties.isEmpty ? null : mergedProperties,
+    );
     if (propsError != null) {
       throw MGMError(
         type: MGMErrorType.invalidProperties,
@@ -199,7 +231,7 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
       deviceManufacturer: MGMUtils.getDeviceManufacturer(),
       locale: MGMUtils.getLocale(),
       timezone: MGMUtils.getTimezone(),
-      properties: properties,
+      properties: mergedProperties.isEmpty ? null : mergedProperties,
     );
 
     mgm._eventStorage!.store(event);
@@ -247,6 +279,65 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
     mgm._sessionId = MGMUtils.generateUUID();
     await mgm._stateStorage!.setString(_sessionIdKey, mgm._sessionId);
     MGMLogger.debug('Started new session: ${mgm._sessionId}');
+  }
+
+  // Super Properties
+
+  /// Set a single super property that will be included with every event.
+  ///
+  /// Super properties are persisted across app launches.
+  static Future<void> setSuperProperty(String key, dynamic value) async {
+    _ensureConfigured();
+
+    final mgm = instance;
+    mgm._superProperties[key] = value;
+    await mgm._saveSuperProperties();
+    MGMLogger.debug('Set super property: $key');
+  }
+
+  /// Set multiple super properties at once.
+  ///
+  /// Super properties are persisted across app launches.
+  static Future<void> setSuperProperties(
+    Map<String, dynamic> properties,
+  ) async {
+    _ensureConfigured();
+
+    final mgm = instance;
+    mgm._superProperties.addAll(properties);
+    await mgm._saveSuperProperties();
+    MGMLogger.debug('Set super properties: ${properties.keys.join(', ')}');
+  }
+
+  /// Remove a single super property.
+  static Future<void> removeSuperProperty(String key) async {
+    _ensureConfigured();
+
+    final mgm = instance;
+    mgm._superProperties.remove(key);
+    await mgm._saveSuperProperties();
+    MGMLogger.debug('Removed super property: $key');
+  }
+
+  /// Clear all super properties.
+  static Future<void> clearSuperProperties() async {
+    _ensureConfigured();
+
+    final mgm = instance;
+    mgm._superProperties.clear();
+    await mgm._stateStorage!.setString(_superPropertiesKey, null);
+    MGMLogger.debug('Cleared all super properties');
+  }
+
+  /// Get all current super properties.
+  static Map<String, dynamic> getSuperProperties() {
+    _ensureConfigured();
+    return Map<String, dynamic>.from(instance._superProperties);
+  }
+
+  Future<void> _saveSuperProperties() async {
+    final json = jsonEncode(_superProperties);
+    await _stateStorage!.setString(_superPropertiesKey, json);
   }
 
   /// Flush pending events to the server.
