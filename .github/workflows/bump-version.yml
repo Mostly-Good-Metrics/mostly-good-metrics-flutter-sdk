@@ -93,6 +93,14 @@ jobs:
             sed -i "s/version = \".*\"/version = \"$NEW\"/" "$FILE"
           fi
 
+      - name: Update SDK version constant in code
+        run: |
+          NEW="${{ steps.version.outputs.new }}"
+          # Flutter SDK - update sdkVersion in network.dart
+          if [ -f "lib/src/network.dart" ]; then
+            sed -i "s/const String sdkVersion = '.*';/const String sdkVersion = '$NEW';/" lib/src/network.dart
+          fi
+
       - name: Create Pull Request
         id: create-pr
         uses: peter-evans/create-pull-request@v6
