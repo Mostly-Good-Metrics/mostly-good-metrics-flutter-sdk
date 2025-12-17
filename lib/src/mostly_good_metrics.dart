@@ -221,6 +221,7 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
 
     final event = MGMEvent(
       name: name,
+      clientEventId: MGMUtils.generateUUID(),
       timestamp: DateTime.now(),
       userId: mgm._userId,
       sessionId: mgm._sessionId,

@@ -74,6 +74,9 @@ class MGMEvent {
   /// The name of the event.
   final String name;
 
+  /// Unique client-generated ID for deduplication.
+  final String clientEventId;
+
   /// The timestamp when the event occurred.
   final DateTime timestamp;
 
@@ -113,6 +116,7 @@ class MGMEvent {
   /// Creates a new event.
   const MGMEvent({
     required this.name,
+    required this.clientEventId,
     required this.timestamp,
     this.userId,
     this.sessionId,
@@ -131,6 +135,7 @@ class MGMEvent {
   factory MGMEvent.fromJson(Map<String, dynamic> json) {
     return MGMEvent(
       name: json['name'] as String,
+      clientEventId: json['client_event_id'] as String,
       timestamp: DateTime.parse(json['timestamp'] as String),
       userId: json['userId'] as String?,
       sessionId: json['sessionId'] as String?,
@@ -150,6 +155,7 @@ class MGMEvent {
   Map<String, dynamic> toJson() {
     return {
       'name': name,
+      'client_event_id': clientEventId,
       'timestamp': timestamp.toUtc().toIso8601String(),
       if (userId != null) 'userId': userId,
       if (sessionId != null) 'sessionId': sessionId,

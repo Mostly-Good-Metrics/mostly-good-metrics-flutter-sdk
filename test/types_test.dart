@@ -61,6 +61,7 @@ void main() {
       final timestamp = DateTime.now();
       final event = MGMEvent(
         name: 'test_event',
+        clientEventId: '550e8400-e29b-41d4-a716-446655440000',
         timestamp: timestamp,
         userId: 'user-123',
         sessionId: 'session-456',
@@ -72,6 +73,7 @@ void main() {
       );
 
       expect(event.name, 'test_event');
+      expect(event.clientEventId, '550e8400-e29b-41d4-a716-446655440000');
       expect(event.timestamp, timestamp);
       expect(event.userId, 'user-123');
       expect(event.sessionId, 'session-456');
@@ -86,6 +88,7 @@ void main() {
       final timestamp = DateTime.utc(2024, 1, 15, 12, 30, 45);
       final event = MGMEvent(
         name: 'test_event',
+        clientEventId: '550e8400-e29b-41d4-a716-446655440000',
         timestamp: timestamp,
         userId: 'user-123',
         sessionId: 'session-456',
@@ -99,6 +102,7 @@ void main() {
       final json = event.toJson();
 
       expect(json['name'], 'test_event');
+      expect(json['client_event_id'], '550e8400-e29b-41d4-a716-446655440000');
       expect(json['timestamp'], '2024-01-15T12:30:45.000Z');
       expect(json['userId'], 'user-123');
       expect(json['sessionId'], 'session-456');
@@ -113,6 +117,7 @@ void main() {
       final timestamp = DateTime.utc(2024, 1, 15);
       final event = MGMEvent(
         name: 'minimal_event',
+        clientEventId: '550e8400-e29b-41d4-a716-446655440000',
         timestamp: timestamp,
         platform: 'web',
         environment: 'production',
@@ -120,6 +125,7 @@ void main() {
 
       final json = event.toJson();
 
+      expect(json.containsKey('client_event_id'), true);
       expect(json.containsKey('userId'), false);
       expect(json.containsKey('sessionId'), false);
       expect(json.containsKey('appVersion'), false);
@@ -130,6 +136,7 @@ void main() {
     test('fromJson deserializes correctly', () {
       final json = {
         'name': 'deserialized_event',
+        'client_event_id': '550e8400-e29b-41d4-a716-446655440000',
         'timestamp': '2024-01-15T10:00:00.000Z',
         'userId': 'user-789',
         'sessionId': 'session-abc',
@@ -145,6 +152,7 @@ void main() {
       final event = MGMEvent.fromJson(json);
 
       expect(event.name, 'deserialized_event');
+      expect(event.clientEventId, '550e8400-e29b-41d4-a716-446655440000');
       expect(event.timestamp, DateTime.utc(2024, 1, 15, 10, 0, 0));
       expect(event.userId, 'user-789');
       expect(event.sessionId, 'session-abc');
@@ -160,6 +168,7 @@ void main() {
     test('roundtrip serialization works', () {
       final original = MGMEvent(
         name: 'roundtrip_event',
+        clientEventId: '550e8400-e29b-41d4-a716-446655440000',
         timestamp: DateTime.utc(2024, 6, 1, 15, 30),
         userId: 'user-test',
         sessionId: 'session-test',
@@ -174,6 +183,7 @@ void main() {
       final deserialized = MGMEvent.fromJson(json);
 
       expect(deserialized.name, original.name);
+      expect(deserialized.clientEventId, original.clientEventId);
       expect(deserialized.timestamp, original.timestamp);
       expect(deserialized.userId, original.userId);
       expect(deserialized.sessionId, original.sessionId);
@@ -188,6 +198,7 @@ void main() {
       final timestamp = DateTime.now();
       final event = MGMEvent(
         name: 'test_event',
+        clientEventId: '550e8400-e29b-41d4-a716-446655440000',
         timestamp: timestamp,
         platform: 'ios',
         environment: 'production',
@@ -209,6 +220,7 @@ void main() {
       final timestamp = DateTime.utc(2024, 1, 15, 12, 30, 45);
       final event = MGMEvent(
         name: 'test_event',
+        clientEventId: '550e8400-e29b-41d4-a716-446655440000',
         timestamp: timestamp,
         platform: 'android',
         environment: 'production',
@@ -231,6 +243,7 @@ void main() {
     test('fromJson deserializes new device properties', () {
       final json = {
         'name': 'deserialized_event',
+        'client_event_id': '550e8400-e29b-41d4-a716-446655440000',
         'timestamp': '2024-01-15T10:00:00.000Z',
         'platform': 'android',
         'environment': 'production',
@@ -253,6 +266,7 @@ void main() {
     test('roundtrip serialization preserves new device properties', () {
       final original = MGMEvent(
         name: 'roundtrip_event',
+        clientEventId: '550e8400-e29b-41d4-a716-446655440000',
         timestamp: DateTime.utc(2024, 6, 1, 15, 30),
         platform: 'ios',
         environment: 'production',
@@ -272,6 +286,21 @@ void main() {
       expect(deserialized.locale, original.locale);
       expect(deserialized.timezone, original.timezone);
     });
+
+    test('clientEventId serializes as client_event_id in JSON', () {
+      final event = MGMEvent(
+        name: 'test_event',
+        clientEventId: '550e8400-e29b-41d4-a716-446655440000',
+        timestamp: DateTime.utc(2024, 1, 1),
+        platform: 'ios',
+        environment: 'production',
+      );
+
+      final json = event.toJson();
+
+      expect(json['client_event_id'], '550e8400-e29b-41d4-a716-446655440000');
+      expect(json.containsKey('clientEventId'), false);
+    });
   });
 
   group('EventsPayload', () {
@@ -280,12 +309,14 @@ void main() {
       final events = [
         MGMEvent(
           name: 'event1',
+          clientEventId: '550e8400-e29b-41d4-a716-446655440001',
           timestamp: timestamp,
           platform: 'ios',
           environment: 'production',
         ),
         MGMEvent(
           name: 'event2',
+          clientEventId: '550e8400-e29b-41d4-a716-446655440002',
           timestamp: timestamp,
           platform: 'ios',
           environment: 'production',
