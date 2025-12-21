@@ -30,7 +30,7 @@ class MGMConfiguration {
   /// Creates a new configuration for MostlyGoodMetrics.
   const MGMConfiguration({
     required this.apiKey,
-    this.baseUrl = 'https://mostlygoodmetrics.com',
+    this.baseUrl = 'https://ingest.mostlygoodmetrics.com',
     this.environment = 'production',
     this.appVersion,
     this.maxBatchSize = 100,

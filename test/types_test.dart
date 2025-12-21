@@ -7,7 +7,7 @@ void main() {
       const config = MGMConfiguration(apiKey: 'test-api-key');
 
       expect(config.apiKey, 'test-api-key');
-      expect(config.baseUrl, 'https://mostlygoodmetrics.com');
+      expect(config.baseUrl, 'https://ingest.mostlygoodmetrics.com');
       expect(config.environment, 'production');
       expect(config.maxBatchSize, 100);
       expect(config.flushInterval, 30);
