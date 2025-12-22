@@ -104,11 +104,11 @@ void main() {
       expect(json['name'], 'test_event');
       expect(json['client_event_id'], '550e8400-e29b-41d4-a716-446655440000');
       expect(json['timestamp'], '2024-01-15T12:30:45.000Z');
-      expect(json['userId'], 'user-123');
-      expect(json['sessionId'], 'session-456');
+      expect(json['user_id'], 'user-123');
+      expect(json['session_id'], 'session-456');
       expect(json['platform'], 'android');
-      expect(json['appVersion'], '2.0.0');
-      expect(json['osVersion'], '14');
+      expect(json['app_version'], '2.0.0');
+      expect(json['os_version'], '14');
       expect(json['environment'], 'staging');
       expect(json['properties'], {'count': 42});
     });
@@ -126,10 +126,10 @@ void main() {
       final json = event.toJson();
 
       expect(json.containsKey('client_event_id'), true);
-      expect(json.containsKey('userId'), false);
-      expect(json.containsKey('sessionId'), false);
-      expect(json.containsKey('appVersion'), false);
-      expect(json.containsKey('osVersion'), false);
+      expect(json.containsKey('user_id'), false);
+      expect(json.containsKey('session_id'), false);
+      expect(json.containsKey('app_version'), false);
+      expect(json.containsKey('os_version'), false);
       expect(json.containsKey('properties'), false);
     });
 
@@ -138,11 +138,11 @@ void main() {
         'name': 'deserialized_event',
         'client_event_id': '550e8400-e29b-41d4-a716-446655440000',
         'timestamp': '2024-01-15T10:00:00.000Z',
-        'userId': 'user-789',
-        'sessionId': 'session-abc',
+        'user_id': 'user-789',
+        'session_id': 'session-abc',
         'platform': 'macos',
-        'appVersion': '3.0.0',
-        'osVersion': '14.0',
+        'app_version': '3.0.0',
+        'os_version': '14.0',
         'environment': 'development',
         'properties': {
           'nested': {'key': 'value'},
@@ -233,9 +233,9 @@ void main() {
 
       final json = event.toJson();
 
-      expect(json['appVersion'], '1.2.3');
-      expect(json['appBuildNumber'], '42');
-      expect(json['deviceManufacturer'], 'Samsung');
+      expect(json['app_version'], '1.2.3');
+      expect(json['app_build_number'], '42');
+      expect(json['device_manufacturer'], 'Samsung');
       expect(json['locale'], 'fr_FR');
       expect(json['timezone'], 'Europe/Paris');
     });
@@ -247,9 +247,9 @@ void main() {
         'timestamp': '2024-01-15T10:00:00.000Z',
         'platform': 'android',
         'environment': 'production',
-        'appVersion': '2.0.0',
-        'appBuildNumber': '123',
-        'deviceManufacturer': 'Google',
+        'app_version': '2.0.0',
+        'app_build_number': '123',
+        'device_manufacturer': 'Google',
         'locale': 'de_DE',
         'timezone': 'Europe/Berlin',
       };
@@ -337,7 +337,7 @@ void main() {
       expect(json['events'], isA<List>());
       expect((json['events'] as List).length, 2);
       expect(json['context']['platform'], 'ios');
-      expect(json['context']['appVersion'], '1.0.0');
+      expect(json['context']['app_version'], '1.0.0');
     });
   });
 
@@ -373,9 +373,9 @@ void main() {
 
       final json = context.toJson();
 
-      expect(json['appVersion'], '2.0.0');
-      expect(json['appBuildNumber'], '100');
-      expect(json['deviceManufacturer'], 'Samsung');
+      expect(json['app_version'], '2.0.0');
+      expect(json['app_build_number'], '100');
+      expect(json['device_manufacturer'], 'Samsung');
       expect(json['locale'], 'fr_FR');
       expect(json['timezone'], 'Europe/Paris');
     });
@@ -388,8 +388,8 @@ void main() {
 
       final json = context.toJson();
 
-      expect(json.containsKey('appBuildNumber'), false);
-      expect(json.containsKey('deviceManufacturer'), false);
+      expect(json.containsKey('app_build_number'), false);
+      expect(json.containsKey('device_manufacturer'), false);
       expect(json.containsKey('locale'), false);
       expect(json.containsKey('timezone'), false);
     });
