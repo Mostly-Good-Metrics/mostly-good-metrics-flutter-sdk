@@ -38,14 +38,19 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
   Timer? _flushTimer;
 
   String? _userId;
+  String? _anonymousId;
   String? _sessionId;
   bool _isAppInForeground = true;
 
   // Storage keys
   static const String _userIdKey = 'userId';
+  static const String _anonymousIdKey = 'anonymousId';
   static const String _sessionIdKey = 'sessionId';
   static const String _appVersionKey = 'appVersion';
   static const String _superPropertiesKey = 'superProperties';
+
+  /// The effective user ID to use in events (identified user or anonymous).
+  String? get _effectiveUserId => _userId ?? _anonymousId;
 
   // In-memory cache for super properties
   Map<String, dynamic> _superProperties = {};
@@ -123,6 +128,16 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
   Future<void> _restoreState() async {
     _userId = await _stateStorage!.getString(_userIdKey);
     MGMLogger.debug('Restored userId: $_userId');
+
+    // Restore or generate anonymous ID
+    _anonymousId = await _stateStorage!.getString(_anonymousIdKey);
+    if (_anonymousId == null) {
+      _anonymousId = MGMUtils.generateAnonymousId();
+      await _stateStorage!.setString(_anonymousIdKey, _anonymousId);
+      MGMLogger.debug('Generated new anonymousId: $_anonymousId');
+    } else {
+      MGMLogger.debug('Restored anonymousId: $_anonymousId');
+    }
 
     // Restore super properties
     final superPropsJson = await _stateStorage!.getString(_superPropertiesKey);
@@ -223,7 +238,7 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
       name: name,
       clientEventId: MGMUtils.generateUUID(),
       timestamp: DateTime.now(),
-      userId: mgm._userId,
+      userId: mgm._effectiveUserId,
       sessionId: mgm._sessionId,
       platform: MGMUtils.getPlatformName(),
       appVersion: mgm._config!.appVersion,
@@ -372,6 +387,14 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
     return instance._userId;
   }
 
+  /// Get the anonymous ID.
+  /// This is auto-generated and persisted across app launches.
+  /// Format: $anon_xxxxxxxxxxxx (12 random alphanumeric chars)
+  static String? get anonymousId {
+    _ensureConfigured();
+    return instance._anonymousId;
+  }
+
   /// Get the current session ID.
   static String? get sessionId {
     _ensureConfigured();
@@ -403,7 +426,7 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
         platform: MGMUtils.getPlatformName(),
         appVersion: _config!.appVersion,
         osVersion: MGMUtils.getOSVersion(),
-        userId: _userId,
+        userId: _effectiveUserId,
         sessionId: _sessionId,
         environment: _config!.environment,
         deviceManufacturer: MGMUtils.getDeviceManufacturer(),
