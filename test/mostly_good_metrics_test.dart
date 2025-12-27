@@ -229,7 +229,8 @@ void main() {
       MostlyGoodMetrics.track('after_identify');
 
       final events = await eventStorage.fetchEvents(2);
-      expect(events[0].userId, null);
+      // Before identify, events use anonymous ID
+      expect(events[0].userId, startsWith(r'$anon_'));
       expect(events[1].userId, 'user-test');
     });
   });
