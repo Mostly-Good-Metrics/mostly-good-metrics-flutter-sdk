@@ -85,6 +85,20 @@ class MGMUtils {
         '${hex.substring(20)}';
   }
 
+  /// Generates a random alphanumeric string of the given length.
+  static String generateRandomString(int length) {
+    const chars = '0123456789abcdefghijklmnopqrstuvwxyz';
+    final random = Random.secure();
+    return List.generate(length, (_) => chars[random.nextInt(chars.length)])
+        .join();
+  }
+
+  /// Generates an anonymous user ID with $anon_ prefix.
+  /// Format: $anon_xxxxxxxxxxxx (12 random alphanumeric chars)
+  static String generateAnonymousId() {
+    return '\$anon_${generateRandomString(12)}';
+  }
+
   /// Gets the current platform name.
   static String getPlatformName() {
     if (kIsWeb) {
