@@ -233,6 +233,143 @@ void main() {
       expect(events[0].userId, startsWith(r'$anon_'));
       expect(events[1].userId, 'user-test');
     });
+
+    test(r'sends $identify event with email', () async {
+      await configureSDK();
+
+      await MostlyGoodMetrics.identify(
+        'user-email',
+        profile: const UserProfile(email: 'test@example.com'),
+      );
+
+      final events = await eventStorage.fetchEvents(10);
+      final identifyEvents =
+          events.where((e) => e.name == r'$identify').toList();
+
+      expect(identifyEvents.length, 1);
+      expect(identifyEvents[0].properties!['email'], 'test@example.com');
+      expect(identifyEvents[0].properties!.containsKey('name'), false);
+    });
+
+    test(r'sends $identify event with name', () async {
+      await configureSDK();
+
+      await MostlyGoodMetrics.identify(
+        'user-name',
+        profile: const UserProfile(name: 'John Doe'),
+      );
+
+      final events = await eventStorage.fetchEvents(10);
+      final identifyEvents =
+          events.where((e) => e.name == r'$identify').toList();
+
+      expect(identifyEvents.length, 1);
+      expect(identifyEvents[0].properties!['name'], 'John Doe');
+      expect(identifyEvents[0].properties!.containsKey('email'), false);
+    });
+
+    test(r'sends $identify event with both email and name', () async {
+      await configureSDK();
+
+      await MostlyGoodMetrics.identify(
+        'user-both',
+        profile: const UserProfile(
+          email: 'both@example.com',
+          name: 'Jane Doe',
+        ),
+      );
+
+      final events = await eventStorage.fetchEvents(10);
+      final identifyEvents =
+          events.where((e) => e.name == r'$identify').toList();
+
+      expect(identifyEvents.length, 1);
+      expect(identifyEvents[0].properties!['email'], 'both@example.com');
+      expect(identifyEvents[0].properties!['name'], 'Jane Doe');
+    });
+
+    test(r'does not send $identify event without profile', () async {
+      await configureSDK();
+
+      await MostlyGoodMetrics.identify('user-no-profile');
+
+      final events = await eventStorage.fetchEvents(10);
+      final identifyEvents =
+          events.where((e) => e.name == r'$identify').toList();
+
+      expect(identifyEvents.length, 0);
+    });
+
+    test(r'debounces $identify event with same data', () async {
+      await configureSDK();
+
+      // First identify - should send
+      await MostlyGoodMetrics.identify(
+        'user-debounce',
+        profile: const UserProfile(email: 'debounce@example.com'),
+      );
+
+      // Second identify with same data - should be debounced
+      await MostlyGoodMetrics.identify(
+        'user-debounce',
+        profile: const UserProfile(email: 'debounce@example.com'),
+      );
+
+      final events = await eventStorage.fetchEvents(10);
+      final identifyEvents =
+          events.where((e) => e.name == r'$identify').toList();
+
+      expect(identifyEvents.length, 1);
+    });
+
+    test(r'sends new $identify event when data changes', () async {
+      await configureSDK();
+
+      // First identify
+      await MostlyGoodMetrics.identify(
+        'user-change',
+        profile: const UserProfile(email: 'first@example.com'),
+      );
+
+      // Second identify with different email - should send
+      await MostlyGoodMetrics.identify(
+        'user-change',
+        profile: const UserProfile(email: 'second@example.com'),
+      );
+
+      final events = await eventStorage.fetchEvents(10);
+      final identifyEvents =
+          events.where((e) => e.name == r'$identify').toList();
+
+      expect(identifyEvents.length, 2);
+      expect(identifyEvents[0].properties!['email'], 'first@example.com');
+      expect(identifyEvents[1].properties!['email'], 'second@example.com');
+    });
+
+    test(r'sends new $identify event after resetIdentity', () async {
+      await configureSDK();
+
+      // First identify
+      await MostlyGoodMetrics.identify(
+        'user-reset',
+        profile: const UserProfile(email: 'reset@example.com'),
+      );
+
+      // Reset identity clears debounce state
+      await MostlyGoodMetrics.resetIdentity();
+
+      // Same identify again - should send since state was cleared
+      await MostlyGoodMetrics.identify(
+        'user-reset',
+        profile: const UserProfile(email: 'reset@example.com'),
+      );
+
+      final events = await eventStorage.fetchEvents(10);
+      final identifyEvents =
+          events.where((e) => e.name == r'$identify').toList();
+
+      expect(identifyEvents.length, 2);
+    });
   });
 
   group('MostlyGoodMetrics.resetIdentity', () {
