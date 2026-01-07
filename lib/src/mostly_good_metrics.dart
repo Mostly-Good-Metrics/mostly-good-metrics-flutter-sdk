@@ -48,6 +48,11 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
   static const String _sessionIdKey = 'sessionId';
   static const String _appVersionKey = 'appVersion';
   static const String _superPropertiesKey = 'superProperties';
+  static const String _identifyHashKey = 'identifyHash';
+  static const String _identifyTimestampKey = 'identifyTimestamp';
+
+  // 24 hours in milliseconds
+  static const int _twentyFourHoursMs = 24 * 60 * 60 * 1000;
 
   /// The effective user ID to use in events (identified user or anonymous).
   String? get _effectiveUserId => _userId ?? _anonymousId;
@@ -254,28 +259,95 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
     MGMLogger.debug('Tracked event: $name');
   }
 
-  /// Identify the current user.
+  /// Identify the current user with optional profile data.
   ///
   /// The [userId] will be attached to all subsequent events until
   /// [resetIdentity] is called.
-  static Future<void> identify(String userId) async {
+  ///
+  /// Optional [profile] data (email, name) is sent to the backend via the
+  /// $identify event. Debouncing: only sends $identify if payload changed
+  /// or >24h since last send.
+  static Future<void> identify(String userId, {UserProfile? profile}) async {
     _ensureConfigured();
 
     final mgm = instance;
     mgm._userId = userId;
     await mgm._stateStorage!.setString(_userIdKey, userId);
     MGMLogger.debug('Identified user: $userId');
+
+    // If profile data is provided, check if we should send $identify event
+    if (profile != null && (profile.email != null || profile.name != null)) {
+      await mgm._sendIdentifyEventIfNeeded(userId, profile);
+    }
+  }
+
+  /// Send $identify event if debounce conditions are met.
+  /// Only sends if: hash changed OR more than 24 hours since last send.
+  Future<void> _sendIdentifyEventIfNeeded(
+    String userId,
+    UserProfile profile,
+  ) async {
+    final currentHash = _computeIdentifyHash(userId, profile);
+    final storedHash = await _stateStorage!.getString(_identifyHashKey);
+    final lastSentAtStr = await _stateStorage!.getString(_identifyTimestampKey);
+    final lastSentAt = lastSentAtStr != null ? int.tryParse(lastSentAtStr) : null;
+    final now = DateTime.now().millisecondsSinceEpoch;
+
+    final hashChanged = storedHash != currentHash;
+    final expiredTime = lastSentAt == null || (now - lastSentAt) > _twentyFourHoursMs;
+
+    if (hashChanged || expiredTime) {
+      MGMLogger.debug(
+        r'Sending $identify event (hashChanged=$hashChanged, expiredTime=$expiredTime)',
+      );
+
+      // Build properties with only defined values
+      final properties = <String, dynamic>{};
+      if (profile.email != null) {
+        properties['email'] = profile.email;
+      }
+      if (profile.name != null) {
+        properties['name'] = profile.name;
+      }
+
+      // Track the $identify event
+      track(r'$identify', properties: properties);
+
+      // Update stored hash and timestamp
+      await _stateStorage!.setString(_identifyHashKey, currentHash);
+      await _stateStorage!.setString(_identifyTimestampKey, now.toString());
+    } else {
+      MGMLogger.debug(r'Skipping $identify event (debounced)');
+    }
+  }
+
+  /// Compute a simple hash for debouncing identify calls.
+  String _computeIdentifyHash(String userId, UserProfile profile) {
+    final payload = '$userId|${profile.email ?? ''}|${profile.name ?? ''}';
+    var hash = 0;
+    for (var i = 0; i < payload.length; i++) {
+      hash = ((hash << 5) - hash) + payload.codeUnitAt(i);
+      hash = hash & 0xFFFFFFFF; // Convert to 32-bit integer
+    }
+    return hash.toRadixString(16);
+  }
+
+  /// Clear identify debounce state.
+  Future<void> _clearIdentifyState() async {
+    await _stateStorage!.setString(_identifyHashKey, null);
+    await _stateStorage!.setString(_identifyTimestampKey, null);
   }
 
   /// Reset the current user identity.
   ///
-  /// This clears the userId and starts a new session.
+  /// This clears the userId, identify debounce state, and starts a new session.
   static Future<void> resetIdentity() async {
     _ensureConfigured();
 
     final mgm = instance;
     mgm._userId = null;
     await mgm._stateStorage!.setString(_userIdKey, null);
+    await mgm._clearIdentifyState();
 
     // Start new session
     mgm._sessionId = MGMUtils.generateUUID();

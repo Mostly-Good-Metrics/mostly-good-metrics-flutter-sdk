@@ -18,8 +18,11 @@
 /// // Track events
 /// MostlyGoodMetrics.track('button_clicked', properties: {'button_id': 'signup'});
 ///
-/// // Identify users
-/// MostlyGoodMetrics.identify('user-123');
+/// // Identify users with optional profile data
+/// MostlyGoodMetrics.identify(
+///   'user-123',
+///   profile: UserProfile(email: 'user@example.com', name: 'Jane Doe'),
+/// );
 /// ```
 library mostly_good_metrics_flutter;
 
@@ -32,7 +35,8 @@ export 'src/types.dart'
         MGMErrorType,
         SendResult,
         EventsPayload,
-        EventContext;
+        EventContext,
+        UserProfile;
 export 'src/storage.dart'
     show
         EventStorage,
