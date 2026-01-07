@@ -318,3 +318,18 @@ enum SendResult {
   /// Rate limited - should retry later.
   rateLimited,
 }
+
+/// User profile data for the identify() call.
+class UserProfile {
+  /// The user's email address.
+  final String? email;
+
+  /// The user's display name.
+  final String? name;
+
+  /// Creates a new user profile.
+  const UserProfile({
+    this.email,
+    this.name,
+  });
+}
