@@ -290,11 +290,13 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
     final currentHash = _computeIdentifyHash(userId, profile);
     final storedHash = await _stateStorage!.getString(_identifyHashKey);
     final lastSentAtStr = await _stateStorage!.getString(_identifyTimestampKey);
-    final lastSentAt = lastSentAtStr != null ? int.tryParse(lastSentAtStr) : null;
+    final lastSentAt =
+        lastSentAtStr != null ? int.tryParse(lastSentAtStr) : null;
     final now = DateTime.now().millisecondsSinceEpoch;
 
     final hashChanged = storedHash != currentHash;
-    final expiredTime = lastSentAt == null || (now - lastSentAt) > _twentyFourHoursMs;
+    final expiredTime =
+        lastSentAt == null || (now - lastSentAt) > _twentyFourHoursMs;
 
     if (hashChanged || expiredTime) {
       MGMLogger.debug(
