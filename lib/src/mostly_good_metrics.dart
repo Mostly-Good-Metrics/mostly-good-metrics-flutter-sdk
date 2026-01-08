@@ -514,7 +514,8 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
     setSuperProperty(superPropertyKey, variant);
 
     MGMLogger.debug(
-        'Assigned variant "$variant" for experiment "$experimentName"');
+      'Assigned variant "$variant" for experiment "$experimentName"',
+    );
 
     return variant;
   }
