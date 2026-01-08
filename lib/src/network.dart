@@ -8,7 +8,7 @@ import 'types.dart';
 import 'utils.dart';
 
 /// SDK version for metrics headers
-const String sdkVersion = '0.2.4';
+const String sdkVersion = '0.2.5';
 
 /// Abstract interface for the network client.
 abstract class NetworkClient {
