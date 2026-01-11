@@ -7,8 +7,8 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 class MGMUtils {
   /// Regular expression for validating event names.
   /// Event names must start with a letter (or $) and contain only
-  /// alphanumeric characters and underscores.
-  static final RegExp _eventNameRegex = RegExp(r'^(\$)?[a-zA-Z][a-zA-Z0-9_]*$');
+  /// alphanumeric characters, underscores, and spaces.
+  static final RegExp _eventNameRegex = RegExp(r'^(\$)?[a-zA-Z][a-zA-Z0-9_ ]*$');
 
   /// Maximum length for event names.
   static const int maxEventNameLength = 255;
@@ -29,7 +29,7 @@ class MGMUtils {
 
     if (!_eventNameRegex.hasMatch(name)) {
       return 'Event name must start with a letter (or \$) and contain only '
-          'alphanumeric characters and underscores';
+          'alphanumeric characters, underscores, and spaces';
     }
 
     return null;
