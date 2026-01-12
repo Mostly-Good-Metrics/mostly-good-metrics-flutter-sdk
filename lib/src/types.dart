@@ -333,3 +333,26 @@ class UserProfile {
     this.name,
   });
 }
+
+/// An experiment definition for A/B testing.
+class Experiment {
+  /// The unique identifier for this experiment.
+  final String id;
+
+  /// The available variants for this experiment (e.g., ['a', 'b']).
+  final List<String> variants;
+
+  /// Creates a new experiment.
+  const Experiment({
+    required this.id,
+    required this.variants,
+  });
+
+  /// Creates an experiment from a JSON map.
+  factory Experiment.fromJson(Map<String, dynamic> json) {
+    return Experiment(
+      id: json['id'] as String,
+      variants: (json['variants'] as List<dynamic>).cast<String>(),
+    );
+  }
+}

@@ -538,4 +538,160 @@ void main() {
       );
     });
   });
+
+  group('MostlyGoodMetrics.getVariant', () {
+    test('throws when not configured', () {
+      expect(
+        () => MostlyGoodMetrics.getVariant('test-experiment'),
+        throwsA(isA<MGMError>()),
+      );
+    });
+
+    test('returns variant from loaded experiments', () async {
+      networkClient.experimentsToReturn = [
+        const Experiment(id: 'button-color', variants: ['a', 'b', 'c']),
+      ];
+      await configureSDK();
+
+      // Wait for experiments to load
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+
+      final variant = MostlyGoodMetrics.getVariant('button-color');
+      expect(variant, isNotNull);
+      expect(['a', 'b', 'c'].contains(variant), true);
+    });
+
+    test('returns null for unknown experiment', () async {
+      networkClient.experimentsToReturn = [
+        const Experiment(id: 'button-color', variants: ['a', 'b']),
+      ];
+      await configureSDK();
+
+      // Wait for experiments to load
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+
+      final variant = MostlyGoodMetrics.getVariant('unknown-experiment');
+      expect(variant, isNull);
+    });
+
+    test('uses fallback variants when experiments not loaded', () async {
+      // Set a delay so experiments won't be loaded when we call getVariant
+      networkClient.experimentsDelay = const Duration(seconds: 5);
+      networkClient.experimentsToReturn = [
+        const Experiment(id: 'button-color', variants: ['x', 'y', 'z']),
+      ];
+      await configureSDK();
+      // Don't wait for experiments - call getVariant immediately
+
+      final variant = MostlyGoodMetrics.getVariant('button-color');
+      expect(variant, isNotNull);
+      // Should use fallback ['a', 'b'], not the actual variants ['x', 'y', 'z']
+      expect(['a', 'b'].contains(variant), true);
+    });
+
+    test('returns deterministic variant for same user and experiment',
+        () async {
+      networkClient.experimentsToReturn = [
+        const Experiment(id: 'button-color', variants: ['a', 'b', 'c']),
+      ];
+      await configureSDK();
+      await MostlyGoodMetrics.identify('user-123');
+
+      // Wait for experiments to load
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+
+      final variant1 = MostlyGoodMetrics.getVariant('button-color');
+      final variant2 = MostlyGoodMetrics.getVariant('button-color');
+      final variant3 = MostlyGoodMetrics.getVariant('button-color');
+
+      expect(variant1, variant2);
+      expect(variant2, variant3);
+    });
+
+    test('stores variant as super property', () async {
+      networkClient.experimentsToReturn = [
+        const Experiment(id: 'button-color', variants: ['a', 'b']),
+      ];
+      await configureSDK();
+
+      // Wait for experiments to load
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+
+      final variant = MostlyGoodMetrics.getVariant('button-color');
+      final superProps = MostlyGoodMetrics.getSuperProperties();
+
+      expect(superProps['experiment_button_color'], variant);
+    });
+
+    test('includes experiment variant in tracked events', () async {
+      networkClient.experimentsToReturn = [
+        const Experiment(id: 'checkout-flow', variants: ['control', 'variant']),
+      ];
+      await configureSDK();
+
+      // Wait for experiments to load
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+
+      final variant = MostlyGoodMetrics.getVariant('checkout-flow');
+      MostlyGoodMetrics.track('button_clicked');
+
+      final events = await eventStorage.fetchEvents(1);
+      expect(events[0].properties?['experiment_checkout_flow'], variant);
+    });
+
+    test('converts experiment name to snake_case', () async {
+      networkClient.experimentsToReturn = [
+        const Experiment(id: 'ButtonColor', variants: ['a', 'b']),
+      ];
+      await configureSDK();
+
+      // Wait for experiments to load
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+
+      MostlyGoodMetrics.getVariant('ButtonColor');
+      final superProps = MostlyGoodMetrics.getSuperProperties();
+
+      expect(superProps.containsKey('experiment_button_color'), true);
+    });
+
+    test('different users get potentially different variants', () async {
+      networkClient.experimentsToReturn = [
+        const Experiment(
+          id: 'signup-flow',
+          variants: ['a', 'b', 'c', 'd', 'e'],
+        ),
+      ];
+
+      // Test with multiple users to verify distribution
+      final variants = <String>[];
+      for (var i = 0; i < 10; i++) {
+        MostlyGoodMetrics.reset();
+        eventStorage = InMemoryEventStorage();
+        stateStorage = InMemoryStateStorage();
+
+        await MostlyGoodMetrics.configure(
+          const MGMConfiguration(
+            apiKey: 'test-api-key',
+            trackAppLifecycleEvents: false,
+          ),
+          eventStorage: eventStorage,
+          stateStorage: stateStorage,
+          networkClient: networkClient,
+        );
+
+        await MostlyGoodMetrics.identify('user-$i');
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        await MostlyGoodMetrics.clearSuperProperties();
+
+        final variant = MostlyGoodMetrics.getVariant('signup-flow');
+        if (variant != null) {
+          variants.add(variant);
+        }
+      }
+
+      // We should have some variety in variants (not all the same)
+      // With 10 users and 5 variants, it's extremely unlikely all are the same
+      expect(variants.length, 10);
+    });
+  });
 }

@@ -36,7 +36,8 @@ export 'src/types.dart'
         SendResult,
         EventsPayload,
         EventContext,
-        UserProfile;
+        UserProfile,
+        Experiment;
 export 'src/storage.dart'
     show
         EventStorage,
