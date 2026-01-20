@@ -8,7 +8,8 @@ class MGMUtils {
   /// Regular expression for validating event names.
   /// Event names must start with a letter (or $) and contain only
   /// alphanumeric characters, underscores, and spaces.
-  static final RegExp _eventNameRegex = RegExp(r'^(\$)?[a-zA-Z][a-zA-Z0-9_ ]*$');
+  static final RegExp _eventNameRegex =
+      RegExp(r'^(\$)?[a-zA-Z][a-zA-Z0-9_ ]*$');
 
   /// Maximum length for event names.
   static const int maxEventNameLength = 255;
