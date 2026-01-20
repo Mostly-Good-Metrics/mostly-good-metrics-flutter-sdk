@@ -538,4 +538,310 @@ void main() {
       );
     });
   });
+
+  group('A/B Testing - getVariant', () {
+    test('returns correct variant for known experiment', () async {
+      networkClient.experimentsToReturn = {
+        'onboarding_flow': 'treatment',
+        'pricing_test': 'control',
+      };
+
+      await configureSDK();
+      await MostlyGoodMetrics.ready();
+
+      expect(MostlyGoodMetrics.getVariant('onboarding_flow'), 'treatment');
+      expect(MostlyGoodMetrics.getVariant('pricing_test'), 'control');
+    });
+
+    test('returns null for unknown experiment', () async {
+      networkClient.experimentsToReturn = {
+        'onboarding_flow': 'treatment',
+      };
+
+      await configureSDK();
+      await MostlyGoodMetrics.ready();
+
+      expect(MostlyGoodMetrics.getVariant('unknown_experiment'), null);
+    });
+
+    test('returns null when experiments not loaded', () async {
+      networkClient.experimentsSuccess = false;
+
+      await configureSDK();
+      await MostlyGoodMetrics.ready();
+
+      expect(MostlyGoodMetrics.getVariant('any_experiment'), null);
+    });
+
+    test('sets super property with experiment prefix when variant accessed',
+        () async {
+      networkClient.experimentsToReturn = {
+        'My Experiment': 'treatment',
+      };
+
+      await configureSDK();
+      await MostlyGoodMetrics.ready();
+
+      MostlyGoodMetrics.getVariant('My Experiment');
+
+      // Wait a tick for async super property save
+      await Future<void>.delayed(Duration.zero);
+
+      final superProps = MostlyGoodMetrics.getSuperProperties();
+      expect(superProps[r'$experiment_my_experiment'], 'treatment');
+    });
+
+    test('sets snake_case super property for camelCase experiment name',
+        () async {
+      networkClient.experimentsToReturn = {
+        'myExperimentName': 'variant_b',
+      };
+
+      await configureSDK();
+      await MostlyGoodMetrics.ready();
+
+      MostlyGoodMetrics.getVariant('myExperimentName');
+
+      await Future<void>.delayed(Duration.zero);
+
+      final superProps = MostlyGoodMetrics.getSuperProperties();
+      expect(superProps[r'$experiment_my_experiment_name'], 'variant_b');
+    });
+
+    test('does not set super property when variant is null', () async {
+      networkClient.experimentsToReturn = {};
+
+      await configureSDK();
+      await MostlyGoodMetrics.ready();
+
+      MostlyGoodMetrics.getVariant('nonexistent');
+
+      await Future<void>.delayed(Duration.zero);
+
+      final superProps = MostlyGoodMetrics.getSuperProperties();
+      expect(superProps.keys.where((k) => k.startsWith(r'$experiment_')).length,
+          0);
+    });
+  });
+
+  group('A/B Testing - ready()', () {
+    test('completes after experiments load', () async {
+      networkClient.experimentsToReturn = {'test': 'variant'};
+
+      await configureSDK();
+
+      // ready() should complete
+      await MostlyGoodMetrics.ready();
+
+      expect(MostlyGoodMetrics.experimentsLoaded, true);
+    });
+
+    test('completes immediately if already loaded', () async {
+      networkClient.experimentsToReturn = {'test': 'variant'};
+
+      await configureSDK();
+      await MostlyGoodMetrics.ready();
+
+      // Second call should complete immediately
+      await MostlyGoodMetrics.ready();
+
+      expect(MostlyGoodMetrics.experimentsLoaded, true);
+    });
+
+    test('completes even when fetch fails', () async {
+      networkClient.experimentsSuccess = false;
+
+      await configureSDK();
+      await MostlyGoodMetrics.ready();
+
+      expect(MostlyGoodMetrics.experimentsLoaded, true);
+      expect(MostlyGoodMetrics.assignedVariants, isEmpty);
+    });
+  });
+
+  group('A/B Testing - caching', () {
+    test('caches variants in storage', () async {
+      networkClient.experimentsToReturn = {
+        'cached_experiment': 'cached_variant',
+      };
+
+      await configureSDK();
+      await MostlyGoodMetrics.ready();
+
+      // Check that experiments were stored
+      final storedExperiments = await stateStorage.getString('experiments');
+      expect(storedExperiments, isNotNull);
+      expect(storedExperiments, contains('cached_experiment'));
+    });
+
+    test('restores variants from cache on reconfigure', () async {
+      networkClient.experimentsToReturn = {
+        'cached_experiment': 'cached_variant',
+      };
+
+      await configureSDK();
+      await MostlyGoodMetrics.ready();
+
+      // Get the anonymous ID that was used
+      final anonId = MostlyGoodMetrics.anonymousId;
+
+      // Reset and reconfigure with same storage
+      MostlyGoodMetrics.reset();
+      networkClient.experimentsFetchedForUsers.clear();
+      networkClient.experimentsToReturn = {
+        'different_experiment': 'should_not_see_this',
+      };
+
+      // Reconfigure with same storage (simulating app restart)
+      await MostlyGoodMetrics.configure(
+        const MGMConfiguration(
+          apiKey: 'test-api-key',
+          trackAppLifecycleEvents: false,
+        ),
+        eventStorage: eventStorage,
+        stateStorage: stateStorage,
+        networkClient: networkClient,
+      );
+      await MostlyGoodMetrics.ready();
+
+      // Should have used cache (same anonymous ID) instead of fetching
+      // The variant should be from cache
+      expect(
+          MostlyGoodMetrics.getVariant('cached_experiment'), 'cached_variant');
+    });
+
+    test('refetches experiments when cache expires', () async {
+      networkClient.experimentsToReturn = {
+        'old_experiment': 'old_variant',
+      };
+
+      await configureSDK();
+      await MostlyGoodMetrics.ready();
+
+      // Manually expire the cache by setting old timestamp
+      final longAgo = DateTime.now()
+          .subtract(const Duration(hours: 25))
+          .millisecondsSinceEpoch;
+      await stateStorage.setString('experimentsFetchedAt', longAgo.toString());
+
+      // Reset and reconfigure
+      MostlyGoodMetrics.reset();
+      networkClient.experimentsFetchedForUsers.clear();
+      networkClient.experimentsToReturn = {
+        'new_experiment': 'new_variant',
+      };
+
+      await MostlyGoodMetrics.configure(
+        const MGMConfiguration(
+          apiKey: 'test-api-key',
+          trackAppLifecycleEvents: false,
+        ),
+        eventStorage: eventStorage,
+        stateStorage: stateStorage,
+        networkClient: networkClient,
+      );
+      await MostlyGoodMetrics.ready();
+
+      // Should have fetched new experiments since cache expired
+      expect(networkClient.experimentsFetchedForUsers, isNotEmpty);
+      expect(MostlyGoodMetrics.getVariant('new_experiment'), 'new_variant');
+    });
+  });
+
+  group('A/B Testing - identify cache invalidation', () {
+    test('invalidates cache and refetches when user changes', () async {
+      networkClient.experimentsToReturn = {
+        'anon_experiment': 'anon_variant',
+      };
+
+      await configureSDK();
+      await MostlyGoodMetrics.ready();
+
+      // Verify initial experiments
+      expect(MostlyGoodMetrics.getVariant('anon_experiment'), 'anon_variant');
+
+      // Now identify as a different user
+      networkClient.experimentsFetchedForUsers.clear();
+      networkClient.experimentsToReturn = {
+        'user_experiment': 'user_variant',
+      };
+
+      await MostlyGoodMetrics.identify('user-123');
+      await MostlyGoodMetrics.ready();
+
+      // Should have fetched new experiments for the new user
+      expect(networkClient.experimentsFetchedForUsers, contains('user-123'));
+      expect(MostlyGoodMetrics.getVariant('user_experiment'), 'user_variant');
+      // Old experiment should no longer be available
+      expect(MostlyGoodMetrics.getVariant('anon_experiment'), null);
+    });
+
+    test('does not refetch when identify called with same user', () async {
+      networkClient.experimentsToReturn = {
+        'experiment': 'variant',
+      };
+
+      await configureSDK();
+      await MostlyGoodMetrics.identify('user-123');
+      await MostlyGoodMetrics.ready();
+
+      final fetchCount = networkClient.experimentsFetchedForUsers.length;
+
+      // Identify again with same user
+      await MostlyGoodMetrics.identify('user-123');
+
+      // Should not have fetched again
+      expect(
+        networkClient.experimentsFetchedForUsers.length,
+        fetchCount,
+      );
+    });
+
+    test('clears experiment cache when user changes', () async {
+      networkClient.experimentsToReturn = {
+        'experiment': 'variant',
+      };
+
+      await configureSDK();
+      await MostlyGoodMetrics.ready();
+
+      // Verify cache exists
+      expect(await stateStorage.getString('experiments'), isNotNull);
+
+      // Identify as new user
+      await MostlyGoodMetrics.identify('new-user');
+
+      // Cache should be cleared (even if it will be repopulated)
+      // The key insight is that the userId in cache should change
+      final cachedUserId = await stateStorage.getString('experimentsUserId');
+      // After identify and refetch, the cached userId should be the new user
+      await MostlyGoodMetrics.ready();
+      final newCachedUserId = await stateStorage.getString('experimentsUserId');
+      expect(newCachedUserId, 'new-user');
+    });
+  });
+
+  group('A/B Testing - super properties in events', () {
+    test('includes experiment super property in tracked events', () async {
+      networkClient.experimentsToReturn = {
+        'button_test': 'blue_button',
+      };
+
+      await configureSDK();
+      await MostlyGoodMetrics.ready();
+
+      // Access variant to set super property
+      MostlyGoodMetrics.getVariant('button_test');
+      await Future<void>.delayed(Duration.zero);
+
+      // Track an event
+      MostlyGoodMetrics.track('button_clicked');
+
+      final events = await eventStorage.fetchEvents(1);
+      expect(
+        events[0].properties?[r'$experiment_button_test'],
+        'blue_button',
+      );
+    });
+  });
 }
