@@ -619,8 +619,10 @@ void main() {
       await Future<void>.delayed(Duration.zero);
 
       final superProps = MostlyGoodMetrics.getSuperProperties();
-      expect(superProps.keys.where((k) => k.startsWith(r'$experiment_')).length,
-          0);
+      expect(
+        superProps.keys.where((k) => k.startsWith(r'$experiment_')).length,
+        0,
+      );
     });
   });
 
@@ -682,9 +684,6 @@ void main() {
       await configureSDK();
       await MostlyGoodMetrics.ready();
 
-      // Get the anonymous ID that was used
-      final anonId = MostlyGoodMetrics.anonymousId;
-
       // Reset and reconfigure with same storage
       MostlyGoodMetrics.reset();
       networkClient.experimentsFetchedForUsers.clear();
@@ -707,7 +706,9 @@ void main() {
       // Should have used cache (same anonymous ID) instead of fetching
       // The variant should be from cache
       expect(
-          MostlyGoodMetrics.getVariant('cached_experiment'), 'cached_variant');
+        MostlyGoodMetrics.getVariant('cached_experiment'),
+        'cached_variant',
+      );
     });
 
     test('refetches experiments when cache expires', () async {
@@ -811,9 +812,6 @@ void main() {
       // Identify as new user
       await MostlyGoodMetrics.identify('new-user');
 
-      // Cache should be cleared (even if it will be repopulated)
-      // The key insight is that the userId in cache should change
-      final cachedUserId = await stateStorage.getString('experimentsUserId');
       // After identify and refetch, the cached userId should be the new user
       await MostlyGoodMetrics.ready();
       final newCachedUserId = await stateStorage.getString('experimentsUserId');
