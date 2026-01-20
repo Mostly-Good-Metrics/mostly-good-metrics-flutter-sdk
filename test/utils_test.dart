@@ -9,6 +9,8 @@ void main() {
       expect(MGMUtils.validateEventName('a'), null);
       expect(MGMUtils.validateEventName('event123'), null);
       expect(MGMUtils.validateEventName('Event_Name_123'), null);
+      expect(MGMUtils.validateEventName('Button Clicked'), null);
+      expect(MGMUtils.validateEventName('User Signed Up'), null);
     });
 
     test(r'accepts system event names with $ prefix', () {
@@ -38,7 +40,6 @@ void main() {
     test('rejects event names with invalid characters', () {
       expect(MGMUtils.validateEventName('event-name'), isNotNull);
       expect(MGMUtils.validateEventName('event.name'), isNotNull);
-      expect(MGMUtils.validateEventName('event name'), isNotNull);
       expect(MGMUtils.validateEventName('event@name'), isNotNull);
     });
 
