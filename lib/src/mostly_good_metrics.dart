@@ -42,6 +42,10 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
   String? _sessionId;
   bool _isAppInForeground = true;
 
+  // Experiments cache
+  List<Experiment> _experiments = [];
+  bool _experimentsLoaded = false;
+
   // Storage keys
   static const String _userIdKey = 'userId';
   static const String _anonymousIdKey = 'anonymousId';
@@ -118,6 +122,9 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
 
     // Mark as configured before tracking any events
     _isConfigured = true;
+
+    // Fetch experiments asynchronously (don't block configure)
+    mgm._fetchExperimentsAsync();
 
     // Check for app version changes (may track $app_installed or $app_updated)
     await mgm._checkAppVersionChange();
@@ -430,6 +437,113 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
     await _stateStorage!.setString(_superPropertiesKey, json);
   }
 
+  // Experiments / A/B Testing
+
+  /// Fetch experiments asynchronously (called during configure).
+  void _fetchExperimentsAsync() {
+    _networkClient!.fetchExperiments(_config!).then((experiments) {
+      _experiments = experiments;
+      _experimentsLoaded = true;
+      MGMLogger.debug('Loaded ${experiments.length} experiments');
+    }).catchError((e) {
+      MGMLogger.warning('Failed to fetch experiments: $e');
+      _experimentsLoaded = true; // Mark as loaded even on failure
+    });
+  }
+
+  /// Get the variant for an experiment.
+  ///
+  /// Returns the assigned variant string ('a', 'b', etc.) or null if the
+  /// experiment doesn't exist.
+  ///
+  /// The variant assignment is deterministic based on a hash of the user ID
+  /// and experiment name, ensuring the same user always gets the same variant.
+  ///
+  /// The assigned variant is automatically stored as a super property with
+  /// the key `experiment_{experimentName}` (snake_case).
+  ///
+  /// If experiments haven't been fetched yet, falls back to hash-based
+  /// assignment using 2 variants ('a', 'b').
+  static String? getVariant(String experimentName) {
+    _ensureConfigured();
+
+    final mgm = instance;
+
+    // Check if we already have this variant assigned as a super property
+    final superPropertyKey = 'experiment_${_toSnakeCase(experimentName)}';
+    final existingVariant = mgm._superProperties[superPropertyKey] as String?;
+    if (existingVariant != null) {
+      return existingVariant;
+    }
+
+    // Find the experiment
+    Experiment? experiment;
+    for (final exp in mgm._experiments) {
+      if (exp.id == experimentName) {
+        experiment = exp;
+        break;
+      }
+    }
+
+    List<String> variants;
+    if (experiment != null) {
+      variants = experiment.variants;
+    } else if (!mgm._experimentsLoaded) {
+      // Fallback: experiments not yet loaded, use default 2 variants
+      MGMLogger.debug(
+        'Experiments not loaded yet, using fallback variants for $experimentName',
+      );
+      variants = ['a', 'b'];
+    } else {
+      // Experiment doesn't exist
+      MGMLogger.debug('Experiment "$experimentName" not found');
+      return null;
+    }
+
+    if (variants.isEmpty) {
+      return null;
+    }
+
+    // Compute deterministic variant assignment
+    final userId = mgm._effectiveUserId ?? '';
+    final hash = _computeVariantHash(userId, experimentName);
+    final variantIndex = hash % variants.length;
+    final variant = variants[variantIndex];
+
+    // Store as super property
+    setSuperProperty(superPropertyKey, variant);
+
+    MGMLogger.debug(
+      'Assigned variant "$variant" for experiment "$experimentName"',
+    );
+
+    return variant;
+  }
+
+  /// Compute a deterministic hash for variant assignment.
+  static int _computeVariantHash(String userId, String experimentName) {
+    final input = '$userId|$experimentName';
+    var hash = 0;
+    for (var i = 0; i < input.length; i++) {
+      hash = ((hash << 5) - hash) + input.codeUnitAt(i);
+      hash = hash & 0x7FFFFFFF; // Keep positive 31-bit integer
+    }
+    return hash;
+  }
+
+  /// Convert a string to snake_case.
+  static String _toSnakeCase(String input) {
+    return input
+        .replaceAllMapped(
+          RegExp(r'([A-Z])'),
+          (match) => '_${match.group(1)!.toLowerCase()}',
+        )
+        .replaceAll(RegExp(r'[^a-z0-9_]'), '_')
+        .replaceAll(RegExp(r'_+'), '_')
+        .replaceAll(RegExp(r'^_|_$'), '')
+        .toLowerCase();
+  }
+
   /// Flush pending events to the server.
   ///
   /// This is called automatically based on the [flushInterval] configuration,
@@ -582,6 +696,8 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
   static void reset() {
     if (_instance != null) {
       _instance!._flushTimer?.cancel();
+      _instance!._experiments = [];
+      _instance!._experimentsLoaded = false;
       WidgetsBinding.instance.removeObserver(_instance!);
     }
     _instance = null;

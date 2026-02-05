@@ -18,6 +18,9 @@ abstract class NetworkClient {
     MGMConfiguration config,
   );
 
+  /// Fetch active experiments from the API.
+  Future<List<Experiment>> fetchExperiments(MGMConfiguration config);
+
   /// Check if we're currently rate limited.
   bool isRateLimited();
 
@@ -135,6 +138,55 @@ class HttpNetworkClient implements NetworkClient {
   void clearRateLimiting() {
     _retryAfterTime = null;
   }
+
+  @override
+  Future<List<Experiment>> fetchExperiments(MGMConfiguration config) async {
+    final url = Uri.parse('${config.baseUrl}/v1/experiments');
+
+    MGMLogger.debug('Fetching experiments from $url');
+
+    try {
+      final osVersion = MGMUtils.getOSVersion();
+      final response = await _client.get(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'X-MGM-Key': config.apiKey,
+          'User-Agent': 'MostlyGoodMetrics-Flutter/$sdkVersion',
+          'X-MGM-SDK': 'flutter',
+          'X-MGM-SDK-Version': sdkVersion,
+          'X-MGM-Platform': MGMUtils.getPlatformName(),
+          if (osVersion != null) 'X-MGM-Platform-Version': osVersion,
+        },
+      );
+
+      MGMLogger.debug('Experiments response status: ${response.statusCode}');
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        final data = json.decode(response.body) as Map<String, dynamic>;
+        final experimentsList = data['experiments'] as List<dynamic>? ?? [];
+        final experiments = experimentsList
+            .map((e) => Experiment.fromJson(e as Map<String, dynamic>))
+            .toList();
+        MGMLogger.debug('Fetched ${experiments.length} experiments');
+        return experiments;
+      }
+
+      MGMLogger.warning(
+        'Failed to fetch experiments: ${response.statusCode} - ${response.body}',
+      );
+      return [];
+    } on SocketException catch (e) {
+      MGMLogger.error('Network error fetching experiments', e);
+      return [];
+    } on http.ClientException catch (e) {
+      MGMLogger.error('HTTP client error fetching experiments', e);
+      return [];
+    } catch (e) {
+      MGMLogger.error('Unknown error fetching experiments', e);
+      return [];
+    }
+  }
 }
 
 /// Mock network client for testing.
@@ -144,6 +196,12 @@ class MockNetworkClient implements NetworkClient {
   bool _rateLimited = false;
   DateTime? _retryAfterTime;
 
+  /// Mock experiments to return from fetchExperiments.
+  List<Experiment> experimentsToReturn = [];
+
+  /// Optional delay before returning experiments (for testing timing).
+  Duration? experimentsDelay;
+
   @override
   Future<SendResult> sendEvents(
     EventsPayload payload,
@@ -151,6 +209,14 @@ class MockNetworkClient implements NetworkClient {
   ) async {
     sentPayloads.add(payload);
     return resultToReturn;
+  }
+
+  @override
+  Future<List<Experiment>> fetchExperiments(MGMConfiguration config) async {
+    if (experimentsDelay != null) {
+      await Future<void>.delayed(experimentsDelay!);
+    }
+    return experimentsToReturn;
   }
 
   @override
