@@ -217,13 +217,13 @@ await MostlyGoodMetrics.clearPendingEvents();
 
 The SDK automatically:
 
-- **Persists events** to local storage, surviving app restarts
-- **Batches events** for efficient network usage
-- **Flushes on interval** (default: every 30 seconds)
-- **Flushes on background** when the app goes to background
-- **Retries on failure** for network errors (events are preserved)
-- **Persists user ID** across app launches
-- **Generates session IDs** per app launch
+- **Persists** events to local storage, surviving app restarts
+- **Batches** events for efficient network usage
+- **Flushes** events periodically (default: every 30 seconds)
+- **Flushes** events when the app goes to background
+- **Retries** failed requests with preserved events
+- **Persists** user identity across app launches
+- **Generates** unique session IDs per app launch
 
 ## Debug Logging
 
