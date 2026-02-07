@@ -88,7 +88,7 @@ For more control, pass additional configuration:
 await MostlyGoodMetrics.configure(
   MGMConfiguration(
     apiKey: 'mgm_proj_your_api_key',
-    baseUrl: 'https://mostlygoodmetrics.com',
+    baseUrl: 'https://ingest.mostlygoodmetrics.com',
     environment: 'production',
     appVersion: '1.0.0', // Required for install/update tracking
     maxBatchSize: 100,
@@ -103,9 +103,9 @@ await MostlyGoodMetrics.configure(
 | Option | Default | Description |
 |--------|---------|-------------|
 | `apiKey` | Required | Your MostlyGoodMetrics API key |
-| `baseUrl` | `https://mostlygoodmetrics.com` | API endpoint |
+| `baseUrl` | `https://ingest.mostlygoodmetrics.com` | API endpoint |
 | `environment` | `"production"` | Environment name |
-| `appVersion` | - | App version string (required for install/update tracking) |
+| `appVersion` | Required | App version string for install/update tracking |
 | `maxBatchSize` | `100` | Events per batch (1-1000) |
 | `flushInterval` | `30` | Auto-flush interval in seconds |
 | `maxStoredEvents` | `10000` | Max cached events |
@@ -124,11 +124,27 @@ When `trackAppLifecycleEvents` is enabled (default), the SDK automatically track
 | `$app_foregrounded` | App became active | - |
 | `$app_backgrounded` | App went to background | - |
 
+## Automatic Context
+
+The SDK automatically includes the following context with every event:
+
+| Property | Description | Example |
+|----------|-------------|---------|
+| `platform` | Current platform | `ios`, `android`, `web`, `macos`, `windows`, `linux` |
+| `app_version` | App version from config | `1.0.0` |
+| `os_version` | Operating system version | `17.0.1` |
+| `environment` | Environment from config | `production` |
+| `device_manufacturer` | Device manufacturer | `Apple` (iOS/macOS only) |
+| `locale` | User's locale | `en_US` |
+| `timezone` | User's timezone | `EST`, `UTC+5` |
+| `user_id` | Identified or anonymous user ID | `user_123` or `$anon_abc123` |
+| `session_id` | Current session ID | `550e8400-e29b-41d4-a716-446655440000` |
+
 ## Event Naming
 
 Event names must:
 - Start with a letter (or `$` for system events)
-- Contain only alphanumeric characters and underscores
+- Contain only alphanumeric characters, underscores, and spaces
 - Be 255 characters or less
 
 ```dart
@@ -136,11 +152,12 @@ Event names must:
 MostlyGoodMetrics.track('button_clicked');
 MostlyGoodMetrics.track('PurchaseCompleted');
 MostlyGoodMetrics.track('step_1_completed');
+MostlyGoodMetrics.track('Button Clicked');  // spaces allowed
 
 // Invalid (will throw MGMError)
-MostlyGoodMetrics.track('123_event');      // starts with number
-MostlyGoodMetrics.track('event-name');     // contains hyphen
-MostlyGoodMetrics.track('event name');     // contains space
+MostlyGoodMetrics.track('123_event');       // starts with number
+MostlyGoodMetrics.track('event-name');      // contains hyphen
+MostlyGoodMetrics.track('_private_event');  // starts with underscore
 ```
 
 ## Properties
@@ -203,13 +220,14 @@ final sessionId = MostlyGoodMetrics.sessionId;
 
 The SDK automatically:
 
-- **Persists events** to local storage, surviving app restarts
-- **Batches events** for efficient network usage
-- **Flushes on interval** (default: every 30 seconds)
-- **Flushes on background** when the app goes to background
-- **Retries on failure** for network errors (events are preserved)
-- **Persists user ID** across app launches
-- **Generates session IDs** per app launch
+- **Persists** events to local storage, surviving app restarts
+- **Batches** events for efficient network usage
+- **Flushes** events on interval (default: every 30 seconds)
+- **Flushes** events when the app goes to background
+- **Retries** failed requests, preserving events for later delivery
+- **Persists** user identity across app launches
+- **Generates** unique session IDs per app launch
+- **Handles** rate limiting gracefully
 
 ## Error Handling
 
