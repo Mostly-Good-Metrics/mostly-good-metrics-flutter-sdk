@@ -9,15 +9,15 @@ A lightweight Flutter SDK for tracking analytics events with [MostlyGoodMetrics]
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Configuration Options](#configuration-options)
+- [Automatic Behavior](#automatic-behavior)
 - [Automatic Events](#automatic-events)
+- [Automatic Context](#automatic-context)
 - [Event Naming](#event-naming)
 - [Properties](#properties)
-- [Automatic Context](#automatic-context)
 - [Manual Flush](#manual-flush)
 - [Session Management](#session-management)
-- [Automatic Behavior](#automatic-behavior)
-- [Error Handling](#error-handling)
 - [Debug Logging](#debug-logging)
+- [Error Handling](#error-handling)
 - [Framework Integration](#framework-integration)
 - [Running the Example](#running-the-example)
 - [Testing](#testing)
@@ -48,10 +48,16 @@ dependencies:
   mostly_good_metrics_flutter: ^0.1.0
 ```
 
-Then run:
+Then install dependencies:
 
 ```bash
 flutter pub get
+```
+
+Or install directly via command line:
+
+```bash
+flutter pub add mostly_good_metrics_flutter
 ```
 
 ## Quick Start
@@ -71,7 +77,7 @@ void main() async {
     MGMConfiguration(apiKey: 'mgm_proj_your_api_key'),
   );
 
-  runApp(MyApp());
+  runApp(const MyApp());
 }
 ```
 
@@ -133,6 +139,20 @@ await MostlyGoodMetrics.configure(
 | `enableDebugLogging` | `false` | Enable debug output |
 | `trackAppLifecycleEvents` | `true` | Auto-track lifecycle events |
 
+## Automatic Behavior
+
+The SDK automatically handles common tasks so you can focus on tracking what matters:
+
+- **Anonymous user ID generation** - UUID automatically generated and persisted for anonymous tracking
+- **User ID persistence** - Identity set via `identify()` persists across app launches; falls back to anonymous ID when reset
+- **Event persistence** - Events are saved to local storage and survive app restarts
+- **Batch processing** - Events are grouped for efficient network usage
+- **Periodic flush** - Events are sent every 30 seconds (configurable via `flushInterval`)
+- **Background flush** - Events are sent when the app goes to background
+- **Retry on failure** - Failed requests are retried; events are preserved until successfully sent
+- **Session management** - New session ID generated on each app launch
+- **Deduplication** - Events include unique IDs (`client_event_id`) to prevent duplicate processing
+
 ## Automatic Events
 
 When `trackAppLifecycleEvents` is enabled (default), the SDK automatically tracks:
@@ -144,6 +164,26 @@ When `trackAppLifecycleEvents` is enabled (default), the SDK automatically track
 | `$app_opened` | App became active | - |
 | `$app_backgrounded` | App went to background | - |
 
+## Automatic Context
+
+Every event automatically includes contextual information. You don't need to manually add these fields.
+
+| Field | Example | Description |
+|-------|---------|-------------|
+| `client_event_id` | `550e8400-e29b-41d4-a716-446655440000` | Unique UUID for deduplication |
+| `timestamp` | `2024-01-15T10:30:00.000Z` | ISO 8601 event time |
+| `user_id` | `user_123` or `$anon_abc123def456` | Identified user ID (if set via `identify()`), or anonymous ID |
+| `session_id` | `a1b2c3d4-e5f6-7890-abcd-ef1234567890` | UUID per app launch (new session each launch) |
+| `platform` | `ios`, `android`, `web`, `macos`, `windows`, `linux` | Platform identifier |
+| `environment` | `production` | Environment name (from config) |
+| `locale` | `en_US`, `fr_FR` | User's locale from device settings |
+| `timezone` | `EST`, `PST`, `UTC+5` | User's timezone offset name |
+| `os_version` | `iOS 17.4`, `Android 14`, `macOS 14.3`, `Version 10.0 (Build 19045)` | Operating system version string |
+| `app_version` | `1.2.3` | App version (if configured) |
+| `device_manufacturer` | `Apple` | Device manufacturer (iOS/macOS only; `null` on other platforms) |
+
+> **Note:** This context is included automatically—no additional code required.
+
 ## Event Naming
 
 Event names must:
@@ -151,7 +191,7 @@ Event names must:
 - Contain only alphanumeric characters, underscores, and spaces
 - Be 255 characters or less
 
-> **Note:** The `$` prefix is reserved for system events (e.g., `$app_opened`, `$app_backgrounded`). Do not use this prefix for your own events.
+**Reserved `$` prefix:** The `$` prefix is reserved for system events (like `$app_opened`, `$app_installed`). Do not use `$` for custom event names.
 
 ```dart
 // Valid
@@ -163,7 +203,7 @@ MostlyGoodMetrics.track('user signed up');  // spaces allowed
 // Invalid (will throw MGMError)
 MostlyGoodMetrics.track('123_event');      // starts with number
 MostlyGoodMetrics.track('event-name');     // contains hyphen
-MostlyGoodMetrics.track('$custom_event');  // $ prefix reserved
+MostlyGoodMetrics.track('$custom_event');  // $ prefix is reserved
 ```
 
 ## Properties
@@ -187,25 +227,6 @@ MostlyGoodMetrics.track('checkout', properties: {
 - String values: max 1000 characters
 - Nesting depth: max 3 levels
 - Total event payload: max 10KB
-
-## Automatic Context
-
-The SDK automatically includes context information with every event batch:
-
-| Field | Description | Example |
-|-------|-------------|---------|
-| `platform` | The platform where the app is running | `ios`, `android`, `web`, `macos`, `windows`, `linux` |
-| `app_version` | App version (if configured) | `1.2.3` |
-| `app_build_number` | App build number (if configured) | `42` |
-| `os_version` | Operating system version | `iOS 17.4`, `Android 14` |
-| `user_id` | User identifier (if set via `identify()`) | `user_123` |
-| `session_id` | Current session identifier | `a1b2c3d4-...` |
-| `environment` | Environment name | `production`, `staging` |
-| `device_manufacturer` | Device manufacturer (iOS/macOS only) | `Apple` |
-| `locale` | User's locale | `en_US` |
-| `timezone` | User's timezone | `EST`, `UTC+5` |
-
-This context is included automatically—no additional code required.
 
 ## Manual Flush
 
@@ -243,17 +264,26 @@ await MostlyGoodMetrics.startNewSession();
 final sessionId = MostlyGoodMetrics.sessionId;
 ```
 
-## Automatic Behavior
+## Debug Logging
 
-The SDK automatically:
+Enable debug logging to see SDK activity:
 
-- **Persists events** to local storage, surviving app restarts
-- **Batches events** for efficient network usage
-- **Flushes on interval** (default: every 30 seconds)
-- **Flushes on background** when the app goes to background
-- **Retries on failure** for network errors (events are preserved)
-- **Persists user ID** across app launches
-- **Generates session IDs** per app launch
+```dart
+await MostlyGoodMetrics.configure(
+  MGMConfiguration(
+    apiKey: 'mgm_proj_your_api_key',
+    enableDebugLogging: true,
+  ),
+);
+```
+
+Output example:
+```
+[MostlyGoodMetrics] Configuring MostlyGoodMetrics SDK
+[MostlyGoodMetrics] Tracked event: button_clicked
+[MostlyGoodMetrics] Flushing 5 events
+[MostlyGoodMetrics] Successfully sent 5 events
+```
 
 ## Error Handling
 
@@ -275,27 +305,6 @@ Error types:
 - `MGMErrorType.networkError` - Network failure
 - `MGMErrorType.storageError` - Storage failure
 - `MGMErrorType.rateLimited` - API rate limited
-
-## Debug Logging
-
-Enable debug logging to see SDK activity:
-
-```dart
-await MostlyGoodMetrics.configure(
-  MGMConfiguration(
-    apiKey: 'mgm_proj_your_api_key',
-    enableDebugLogging: true,
-  ),
-);
-```
-
-Output example:
-```
-[MostlyGoodMetrics] Configuring MostlyGoodMetrics SDK
-[MostlyGoodMetrics] Tracked event: button_clicked
-[MostlyGoodMetrics] Flushing 5 events
-[MostlyGoodMetrics] Successfully sent 5 events
-```
 
 ## Framework Integration
 
