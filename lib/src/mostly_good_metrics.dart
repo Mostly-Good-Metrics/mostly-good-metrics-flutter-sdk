@@ -553,7 +553,7 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
         if (!_isAppInForeground) {
           _isAppInForeground = true;
           if (_config!.trackAppLifecycleEvents) {
-            track(r'$app_foregrounded');
+            track(r'$app_opened');
           }
           // Restart flush timer
           _startFlushTimer();
