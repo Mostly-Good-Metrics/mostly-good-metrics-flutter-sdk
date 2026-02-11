@@ -9,11 +9,13 @@ A lightweight Flutter SDK for tracking analytics events with [MostlyGoodMetrics]
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Configuration Options](#configuration-options)
-- [Automatic Behavior](#automatic-behavior)
-- [Automatic Events](#automatic-events)
-- [Automatic Context](#automatic-context)
+- [User Identification](#user-identification)
+- [Tracking Events](#tracking-events)
 - [Event Naming](#event-naming)
 - [Properties](#properties)
+- [Automatic Events](#automatic-events)
+- [Automatic Context](#automatic-context)
+- [Automatic Behavior](#automatic-behavior)
 - [Manual Flush](#manual-flush)
 - [Session Management](#session-management)
 - [Debug Logging](#debug-logging)
@@ -62,8 +64,6 @@ flutter pub add mostly_good_metrics_flutter
 
 ## Quick Start
 
-### 1. Initialize the SDK
-
 Initialize once at app startup (typically in `main.dart`):
 
 ```dart
@@ -81,28 +81,10 @@ void main() async {
 }
 ```
 
-### 2. Track Events
+Then track events anywhere in your app:
 
 ```dart
-// Simple event
 MostlyGoodMetrics.track('button_clicked');
-
-// Event with properties
-MostlyGoodMetrics.track('purchase_completed', properties: {
-  'product_id': 'SKU123',
-  'price': 29.99,
-  'currency': 'USD',
-});
-```
-
-### 3. Identify Users
-
-```dart
-// Set user identity
-await MostlyGoodMetrics.identify('user_123');
-
-// Reset identity (e.g., on logout)
-await MostlyGoodMetrics.resetIdentity();
 ```
 
 That's it! Events are automatically batched and sent.
@@ -139,19 +121,87 @@ await MostlyGoodMetrics.configure(
 | `enableDebugLogging` | `false` | Enable debug output |
 | `trackAppLifecycleEvents` | `true` | Auto-track lifecycle events |
 
-## Automatic Behavior
+## User Identification
 
-The SDK automatically handles common tasks so you can focus on tracking what matters:
+By default, the SDK tracks events with an anonymous user ID. You can identify users to associate events with a specific user:
 
-- **Anonymous user ID generation** - UUID automatically generated and persisted for anonymous tracking
-- **User ID persistence** - Identity set via `identify()` persists across app launches; falls back to anonymous ID when reset
-- **Event persistence** - Events are saved to local storage and survive app restarts
-- **Batch processing** - Events are grouped for efficient network usage
-- **Periodic flush** - Events are sent every 30 seconds (configurable via `flushInterval`)
-- **Background flush** - Events are sent when the app goes to background
-- **Retry on failure** - Failed requests are retried; events are preserved until successfully sent
-- **Session management** - New session ID generated on each app launch
-- **Deduplication** - Events include unique IDs (`client_event_id`) to prevent duplicate processing
+```dart
+// Set user identity
+await MostlyGoodMetrics.identify('user_123');
+```
+
+Once identified, all future events will be associated with this user ID. The user ID persists across app launches.
+
+To reset the identity (e.g., on logout):
+
+```dart
+// Reset identity (generates new anonymous ID)
+await MostlyGoodMetrics.resetIdentity();
+```
+
+> **Note:** After calling `resetIdentity()`, the SDK generates a new anonymous ID and starts a new session.
+
+## Tracking Events
+
+Track events anywhere in your app:
+
+```dart
+// Simple event
+MostlyGoodMetrics.track('button_clicked');
+
+// Event with properties
+MostlyGoodMetrics.track('purchase_completed', properties: {
+  'product_id': 'SKU123',
+  'price': 29.99,
+  'currency': 'USD',
+});
+```
+
+Events are automatically queued and sent in batches for optimal network usage.
+
+## Event Naming
+
+Event names must:
+- Start with a letter (or `$` for system events)
+- Contain only alphanumeric characters, underscores, and spaces
+- Be 255 characters or less
+
+> **Reserved `$` prefix:** Event names starting with `$` are reserved for SDK system events (e.g., `$app_opened`, `$app_installed`). Do not use the `$` prefix for your own events.
+
+```dart
+// Valid
+MostlyGoodMetrics.track('button_clicked');
+MostlyGoodMetrics.track('PurchaseCompleted');
+MostlyGoodMetrics.track('step_1_completed');
+MostlyGoodMetrics.track('user signed up');  // spaces allowed
+
+// Invalid (will throw MGMError)
+MostlyGoodMetrics.track('123_event');      // starts with number
+MostlyGoodMetrics.track('event-name');     // contains hyphen
+MostlyGoodMetrics.track('$custom_event');  // $ prefix is reserved
+```
+
+## Properties
+
+Events support various property types:
+
+```dart
+MostlyGoodMetrics.track('checkout', properties: {
+  'string_prop': 'value',
+  'int_prop': 42,
+  'double_prop': 3.14,
+  'bool_prop': true,
+  'list_prop': ['a', 'b', 'c'],
+  'nested': {
+    'key': 'value',
+  },
+});
+```
+
+**Limits:**
+- String values: max 1000 characters
+- Nesting depth: max 3 levels
+- Total event payload: max 10KB
 
 ## Automatic Events
 
@@ -201,49 +251,19 @@ Every event automatically includes contextual information to provide rich analyt
 
 > **Note:** All fields are automatically included with every event—no additional code required.
 
-## Event Naming
+## Automatic Behavior
 
-Event names must:
-- Start with a letter (or `$` for system events)
-- Contain only alphanumeric characters, underscores, and spaces
-- Be 255 characters or less
+The SDK automatically handles common tasks so you can focus on tracking what matters:
 
-> **Reserved `$` prefix:** Event names starting with `$` are reserved for SDK system events (e.g., `$app_opened`, `$app_installed`). Do not use the `$` prefix for your own events.
-
-```dart
-// Valid
-MostlyGoodMetrics.track('button_clicked');
-MostlyGoodMetrics.track('PurchaseCompleted');
-MostlyGoodMetrics.track('step_1_completed');
-MostlyGoodMetrics.track('user signed up');  // spaces allowed
-
-// Invalid (will throw MGMError)
-MostlyGoodMetrics.track('123_event');      // starts with number
-MostlyGoodMetrics.track('event-name');     // contains hyphen
-MostlyGoodMetrics.track('$custom_event');  // $ prefix is reserved
-```
-
-## Properties
-
-Events support various property types:
-
-```dart
-MostlyGoodMetrics.track('checkout', properties: {
-  'string_prop': 'value',
-  'int_prop': 42,
-  'double_prop': 3.14,
-  'bool_prop': true,
-  'list_prop': ['a', 'b', 'c'],
-  'nested': {
-    'key': 'value',
-  },
-});
-```
-
-**Limits:**
-- String values: max 1000 characters
-- Nesting depth: max 3 levels
-- Total event payload: max 10KB
+- **Anonymous user ID generation** - UUID automatically generated and persisted for anonymous tracking
+- **User ID persistence** - Identity set via `identify()` persists across app launches; falls back to anonymous ID when reset
+- **Event persistence** - Events are saved to local storage and survive app restarts
+- **Batch processing** - Events are grouped for efficient network usage
+- **Periodic flush** - Events are sent every 30 seconds (configurable via `flushInterval`)
+- **Background flush** - Events are sent when the app goes to background
+- **Retry on failure** - Failed requests are retried; events are preserved until successfully sent
+- **Session management** - New session ID generated on each app launch
+- **Deduplication** - Events include unique IDs (`client_event_id`) to prevent duplicate processing
 
 ## Manual Flush
 
