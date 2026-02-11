@@ -166,23 +166,40 @@ When `trackAppLifecycleEvents` is enabled (default), the SDK automatically track
 
 ## Automatic Context
 
-Every event automatically includes contextual information. You don't need to manually add these fields.
+Every event automatically includes contextual information to provide rich analytics capabilities. You don't need to manually add these fields.
 
-| Field | Example | Description |
-|-------|---------|-------------|
-| `client_event_id` | `550e8400-e29b-41d4-a716-446655440000` | Unique UUID for deduplication |
-| `timestamp` | `2024-01-15T10:30:00.000Z` | ISO 8601 event time |
-| `user_id` | `user_123` or `$anon_abc123def456` | Identified user ID (if set via `identify()`), or anonymous ID |
-| `session_id` | `a1b2c3d4-e5f6-7890-abcd-ef1234567890` | UUID per app launch (new session each launch) |
-| `platform` | `ios`, `android`, `web`, `macos`, `windows`, `linux` | Platform identifier |
-| `environment` | `production` | Environment name (from config) |
-| `locale` | `en_US`, `fr_FR` | User's locale from device settings |
-| `timezone` | `EST`, `PST`, `UTC+5` | User's timezone offset name |
-| `os_version` | `iOS 17.4`, `Android 14`, `macOS 14.3`, `Version 10.0 (Build 19045)` | Operating system version string |
-| `app_version` | `1.2.3` | App version (if configured) |
-| `device_manufacturer` | `Apple` | Device manufacturer (iOS/macOS only; `null` on other platforms) |
+### Identity & Session
 
-> **Note:** This context is included automatically—no additional code required.
+| Field | Description | Example | Persistence |
+|-------|-------------|---------|-------------|
+| `user_id` | Identified user ID (set via `identify()`) or anonymous ID | `user_123` or `$anon_abc123def456` | Persisted in local storage (survives app restarts) |
+| `session_id` | UUID generated per app launch | `a1b2c3d4-e5f6-7890-abcd-ef1234567890` | Regenerated on each app launch |
+
+### Device & Platform
+
+| Field | Description | Example | Source |
+|-------|-------------|---------|--------|
+| `platform` | Platform identifier | `ios`, `android`, `web`, `macos`, `windows`, `linux` | `Platform.operatingSystem` |
+| `os_version` | Operating system version | `iOS 17.4`, `Android 14`, `macOS 14.3`, `Version 10.0 (Build 19045)` | `Platform.operatingSystemVersion` |
+| `device_manufacturer` | Device manufacturer | `Apple` | iOS/macOS only; `null` on other platforms |
+| `locale` | User's locale from device settings | `en_US`, `fr_FR` | Device locale settings |
+| `timezone` | User's timezone offset name | `EST`, `PST`, `UTC+5` | System timezone settings |
+
+### App & Environment
+
+| Field | Description | Example | Source |
+|-------|-------------|---------|--------|
+| `app_version` | App version (if configured) | `1.2.3` | Configuration option (`appVersion`) |
+| `environment` | Environment name | `production`, `staging`, `development` | Configuration option (default: `production`) |
+
+### Event Metadata
+
+| Field | Description | Example | Purpose |
+|-------|-------------|---------|---------|
+| `client_event_id` | Unique UUID for each event | `550e8400-e29b-41d4-a716-446655440000` | Deduplication (prevents processing the same event twice) |
+| `timestamp` | ISO 8601 timestamp when event was tracked | `2024-01-15T10:30:00.000Z` | Event ordering and time-based analysis |
+
+> **Note:** All fields are automatically included with every event—no additional code required.
 
 ## Event Naming
 
@@ -191,7 +208,7 @@ Event names must:
 - Contain only alphanumeric characters, underscores, and spaces
 - Be 255 characters or less
 
-**Reserved `$` prefix:** The `$` prefix is reserved for system events (like `$app_opened`, `$app_installed`). Do not use `$` for custom event names.
+> **Reserved `$` prefix:** Event names starting with `$` are reserved for SDK system events (e.g., `$app_opened`, `$app_installed`). Do not use the `$` prefix for your own events.
 
 ```dart
 // Valid
