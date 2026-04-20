@@ -160,4 +160,25 @@ class MGMUtils {
     // Returning null here since we don't want to add platform channel complexity
     return null;
   }
+
+  /// Converts a string to snake_case.
+  /// Handles spaces, hyphens, and camelCase/PascalCase.
+  /// Example: "My Experiment" -> "my_experiment"
+  /// Example: "myExperiment" -> "my_experiment"
+  /// Example: "my-experiment" -> "my_experiment"
+  static String toSnakeCase(String input) {
+    if (input.isEmpty) return input;
+
+    // Replace spaces and hyphens with underscores
+    var result = input.replaceAll(RegExp(r'[\s-]+'), '_');
+
+    // Insert underscore before uppercase letters (for camelCase/PascalCase)
+    result = result.replaceAllMapped(
+      RegExp(r'([a-z0-9])([A-Z])'),
+      (match) => '${match.group(1)}_${match.group(2)}',
+    );
+
+    // Convert to lowercase
+    return result.toLowerCase();
+  }
 }

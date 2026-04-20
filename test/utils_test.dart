@@ -200,4 +200,44 @@ void main() {
       expect(validPlatforms.contains(platform), true);
     });
   });
+
+  group('MGMUtils.toSnakeCase', () {
+    test('converts spaces to underscores', () {
+      expect(MGMUtils.toSnakeCase('My Experiment'), 'my_experiment');
+      expect(MGMUtils.toSnakeCase('User Signed Up'), 'user_signed_up');
+    });
+
+    test('converts hyphens to underscores', () {
+      expect(MGMUtils.toSnakeCase('my-experiment'), 'my_experiment');
+      expect(MGMUtils.toSnakeCase('user-signed-up'), 'user_signed_up');
+    });
+
+    test('converts camelCase to snake_case', () {
+      expect(MGMUtils.toSnakeCase('myExperiment'), 'my_experiment');
+      expect(MGMUtils.toSnakeCase('userSignedUp'), 'user_signed_up');
+    });
+
+    test('converts PascalCase to snake_case', () {
+      expect(MGMUtils.toSnakeCase('MyExperiment'), 'my_experiment');
+      expect(MGMUtils.toSnakeCase('UserSignedUp'), 'user_signed_up');
+    });
+
+    test('handles already snake_case strings', () {
+      expect(MGMUtils.toSnakeCase('my_experiment'), 'my_experiment');
+      expect(MGMUtils.toSnakeCase('user_signed_up'), 'user_signed_up');
+    });
+
+    test('handles empty string', () {
+      expect(MGMUtils.toSnakeCase(''), '');
+    });
+
+    test('handles single word', () {
+      expect(MGMUtils.toSnakeCase('experiment'), 'experiment');
+      expect(MGMUtils.toSnakeCase('Experiment'), 'experiment');
+    });
+
+    test('handles mixed formats', () {
+      expect(MGMUtils.toSnakeCase('My camelCase-test'), 'my_camel_case_test');
+    });
+  });
 }
