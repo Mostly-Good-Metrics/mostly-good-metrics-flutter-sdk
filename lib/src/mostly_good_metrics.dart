@@ -686,8 +686,8 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
     track(
       r'$experiment_exposure',
       properties: {
-        'experiment': experimentName,
-        'variant': variant,
+        r'$experiment_name': experimentName,
+        r'$variant': variant,
       },
     );
     MGMLogger.debug(

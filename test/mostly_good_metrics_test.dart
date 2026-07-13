@@ -701,8 +701,8 @@ void main() {
 
       final exposures = await exposureEvents();
       expect(exposures.length, 1);
-      expect(exposures[0].properties?['experiment'], 'onboarding_flow');
-      expect(exposures[0].properties?['variant'], 'treatment');
+      expect(exposures[0].properties?[r'$experiment_name'], 'onboarding_flow');
+      expect(exposures[0].properties?[r'$variant'], 'treatment');
     });
 
     test('exposure dedup survives a simulated restart', () async {
