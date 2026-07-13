@@ -2,6 +2,29 @@
 
 A lightweight Flutter SDK for tracking analytics events with [MostlyGoodMetrics](https://mostlygoodmetrics.com).
 
+## Table of Contents
+
+- [Requirements](#requirements)
+- [Platform Support](#platform-support)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Configuration Options](#configuration-options)
+- [User Identification](#user-identification)
+- [Tracking Events](#tracking-events)
+- [Event Naming](#event-naming)
+- [Properties](#properties)
+- [Automatic Events](#automatic-events)
+- [Automatic Context](#automatic-context)
+- [Automatic Behavior](#automatic-behavior)
+- [Manual Flush](#manual-flush)
+- [Session Management](#session-management)
+- [Debug Logging](#debug-logging)
+- [Error Handling](#error-handling)
+- [Framework Integration](#framework-integration)
+- [Running the Example](#running-the-example)
+- [Testing](#testing)
+- [License](#license)
+
 ## Requirements
 
 - Flutter 3.10+
@@ -27,15 +50,19 @@ dependencies:
   mostly_good_metrics_flutter: ^0.1.0
 ```
 
-Then run:
+Then install dependencies:
 
 ```bash
 flutter pub get
 ```
 
-## Quick Start
+Or install directly via command line:
 
-### 1. Initialize the SDK
+```bash
+flutter pub add mostly_good_metrics_flutter
+```
+
+## Quick Start
 
 Initialize once at app startup (typically in `main.dart`):
 
@@ -50,32 +77,14 @@ void main() async {
     MGMConfiguration(apiKey: 'mgm_proj_your_api_key'),
   );
 
-  runApp(MyApp());
+  runApp(const MyApp());
 }
 ```
 
-### 2. Track Events
+Then track events anywhere in your app:
 
 ```dart
-// Simple event
 MostlyGoodMetrics.track('button_clicked');
-
-// Event with properties
-MostlyGoodMetrics.track('purchase_completed', properties: {
-  'product_id': 'SKU123',
-  'price': 29.99,
-  'currency': 'USD',
-});
-```
-
-### 3. Identify Users
-
-```dart
-// Set user identity
-await MostlyGoodMetrics.identify('user_123');
-
-// Reset identity (e.g., on logout)
-await MostlyGoodMetrics.resetIdentity();
 ```
 
 That's it! Events are automatically batched and sent.
@@ -112,35 +121,64 @@ await MostlyGoodMetrics.configure(
 | `enableDebugLogging` | `false` | Enable debug output |
 | `trackAppLifecycleEvents` | `true` | Auto-track lifecycle events |
 
-## Automatic Events
+## User Identification
 
-When `trackAppLifecycleEvents` is enabled (default), the SDK automatically tracks:
+By default, the SDK tracks events with an anonymous user ID. You can identify users to associate events with a specific user:
 
-| Event | When | Properties |
-|-------|------|------------|
-| `$app_installed` | First launch after install | - |
-| `$app_updated` | First launch after version change | `previous_version`, `current_version` |
-| `$app_opened` | App started | - |
-| `$app_foregrounded` | App became active | - |
-| `$app_backgrounded` | App went to background | - |
+```dart
+// Set user identity
+await MostlyGoodMetrics.identify('user_123');
+```
+
+Once identified, all future events will be associated with this user ID. The user ID persists across app launches.
+
+To reset the identity (e.g., on logout):
+
+```dart
+// Reset identity (generates new anonymous ID)
+await MostlyGoodMetrics.resetIdentity();
+```
+
+> **Note:** After calling `resetIdentity()`, the SDK generates a new anonymous ID and starts a new session.
+
+## Tracking Events
+
+Track events anywhere in your app:
+
+```dart
+// Simple event
+MostlyGoodMetrics.track('button_clicked');
+
+// Event with properties
+MostlyGoodMetrics.track('purchase_completed', properties: {
+  'product_id': 'SKU123',
+  'price': 29.99,
+  'currency': 'USD',
+});
+```
+
+Events are automatically queued and sent in batches for optimal network usage.
 
 ## Event Naming
 
 Event names must:
 - Start with a letter (or `$` for system events)
-- Contain only alphanumeric characters and underscores
+- Contain only alphanumeric characters, underscores, and spaces
 - Be 255 characters or less
+
+> **Reserved `$` prefix:** Event names starting with `$` are reserved for SDK system events (e.g., `$app_opened`, `$app_installed`). Do not use the `$` prefix for your own events.
 
 ```dart
 // Valid
 MostlyGoodMetrics.track('button_clicked');
 MostlyGoodMetrics.track('PurchaseCompleted');
 MostlyGoodMetrics.track('step_1_completed');
+MostlyGoodMetrics.track('user signed up');  // spaces allowed
 
 // Invalid (will throw MGMError)
 MostlyGoodMetrics.track('123_event');      // starts with number
 MostlyGoodMetrics.track('event-name');     // contains hyphen
-MostlyGoodMetrics.track('event name');     // contains space
+MostlyGoodMetrics.track('$custom_event');  // $ prefix is reserved
 ```
 
 ## Properties
@@ -161,7 +199,71 @@ MostlyGoodMetrics.track('checkout', properties: {
 ```
 
 **Limits:**
+- String values: max 1000 characters
 - Nesting depth: max 3 levels
+- Total event payload: max 10KB
+
+## Automatic Events
+
+When `trackAppLifecycleEvents` is enabled (default), the SDK automatically tracks:
+
+| Event | When | Properties |
+|-------|------|------------|
+| `$app_installed` | First launch after install | - |
+| `$app_updated` | First launch after version change | `previous_version`, `current_version` |
+| `$app_opened` | App became active | - |
+| `$app_backgrounded` | App went to background | - |
+
+## Automatic Context
+
+Every event automatically includes contextual information to provide rich analytics capabilities. You don't need to manually add these fields.
+
+### Identity & Session
+
+| Field | Description | Example | Persistence |
+|-------|-------------|---------|-------------|
+| `user_id` | Identified user ID (set via `identify()`) or anonymous ID | `user_123` or `$anon_abc123def456` | Persisted in local storage (survives app restarts) |
+| `session_id` | UUID generated per app launch | `a1b2c3d4-e5f6-7890-abcd-ef1234567890` | Regenerated on each app launch |
+
+### Device & Platform
+
+| Field | Description | Example | Source |
+|-------|-------------|---------|--------|
+| `platform` | Platform identifier | `ios`, `android`, `web`, `macos`, `windows`, `linux` | `Platform.operatingSystem` |
+| `os_version` | Operating system version | `iOS 17.4`, `Android 14`, `macOS 14.3`, `Version 10.0 (Build 19045)` | `Platform.operatingSystemVersion` |
+| `device_manufacturer` | Device manufacturer | `Apple` | iOS/macOS only; `null` on other platforms |
+| `locale` | User's locale from device settings | `en_US`, `fr_FR` | Device locale settings |
+| `timezone` | User's timezone offset name | `EST`, `PST`, `UTC+5` | System timezone settings |
+
+### App & Environment
+
+| Field | Description | Example | Source |
+|-------|-------------|---------|--------|
+| `app_version` | App version (if configured) | `1.2.3` | Configuration option (`appVersion`) |
+| `environment` | Environment name | `production`, `staging`, `development` | Configuration option (default: `production`) |
+
+### Event Metadata
+
+| Field | Description | Example | Purpose |
+|-------|-------------|---------|---------|
+| `client_event_id` | Unique UUID for each event | `550e8400-e29b-41d4-a716-446655440000` | Deduplication (prevents processing the same event twice) |
+| `timestamp` | ISO 8601 timestamp when event was tracked | `2024-01-15T10:30:00.000Z` | Event ordering and time-based analysis |
+
+> **Note:** All fields are automatically included with every event—no additional code required.
+
+## Automatic Behavior
+
+The SDK automatically handles common tasks so you can focus on tracking what matters:
+
+- **Anonymous user ID generation** - UUID automatically generated and persisted for anonymous tracking
+- **User ID persistence** - Identity set via `identify()` persists across app launches; falls back to anonymous ID when reset
+- **Event persistence** - Events are saved to local storage and survive app restarts
+- **Batch processing** - Events are grouped for efficient network usage
+- **Periodic flush** - Events are sent every 30 seconds (configurable via `flushInterval`)
+- **Background flush** - Events are sent when the app goes to background
+- **Retry on failure** - Failed requests are retried; events are preserved until successfully sent
+- **Session management** - New session ID generated on each app launch
+- **Deduplication** - Events include unique IDs (`client_event_id`) to prevent duplicate processing
 
 ## Manual Flush
 
@@ -199,17 +301,26 @@ await MostlyGoodMetrics.startNewSession();
 final sessionId = MostlyGoodMetrics.sessionId;
 ```
 
-## Automatic Behavior
+## Debug Logging
 
-The SDK automatically:
+Enable debug logging to see SDK activity:
 
-- **Persists events** to local storage, surviving app restarts
-- **Batches events** for efficient network usage
-- **Flushes on interval** (default: every 30 seconds)
-- **Flushes on background** when the app goes to background
-- **Retries on failure** for network errors (events are preserved)
-- **Persists user ID** across app launches
-- **Generates session IDs** per app launch
+```dart
+await MostlyGoodMetrics.configure(
+  MGMConfiguration(
+    apiKey: 'mgm_proj_your_api_key',
+    enableDebugLogging: true,
+  ),
+);
+```
+
+Output example:
+```
+[MostlyGoodMetrics] Configuring MostlyGoodMetrics SDK
+[MostlyGoodMetrics] Tracked event: button_clicked
+[MostlyGoodMetrics] Flushing 5 events
+[MostlyGoodMetrics] Successfully sent 5 events
+```
 
 ## Error Handling
 
@@ -232,25 +343,63 @@ Error types:
 - `MGMErrorType.storageError` - Storage failure
 - `MGMErrorType.rateLimited` - API rate limited
 
-## Debug Logging
+## Framework Integration
 
-Enable debug logging to see SDK activity:
+### MaterialApp
+
+For a complete Flutter app setup with MostlyGoodMetrics:
 
 ```dart
-await MostlyGoodMetrics.configure(
-  MGMConfiguration(
-    apiKey: 'mgm_proj_your_api_key',
-    enableDebugLogging: true,
-  ),
-);
-```
+import 'package:flutter/foundation.dart' show kDebugMode;
+import 'package:flutter/material.dart';
+import 'package:mostly_good_metrics_flutter/mostly_good_metrics_flutter.dart';
 
-Output example:
-```
-[MostlyGoodMetrics] Configuring MostlyGoodMetrics SDK
-[MostlyGoodMetrics] Tracked event: button_clicked
-[MostlyGoodMetrics] Flushing 5 events
-[MostlyGoodMetrics] Successfully sent 5 events
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  await MostlyGoodMetrics.configure(
+    MGMConfiguration(
+      apiKey: 'mgm_proj_your_api_key',
+      appVersion: '1.0.0',
+      enableDebugLogging: kDebugMode,
+    ),
+  );
+
+  runApp(const MyApp());
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'My App',
+      home: const HomeScreen(),
+    );
+  }
+}
+
+class HomeScreen extends StatelessWidget {
+  const HomeScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Home')),
+      body: Center(
+        child: ElevatedButton(
+          onPressed: () {
+            MostlyGoodMetrics.track('button_clicked', properties: {
+              'screen': 'home',
+            });
+          },
+          child: const Text('Track Event'),
+        ),
+      ),
+    );
+  }
+}
 ```
 
 ## Running the Example

@@ -27,7 +27,17 @@ jobs:
         run: flutter analyze
 
       - name: Run tests
-        run: flutter test
+        run: flutter test --coverage
+
+      - name: Upload coverage to Covallaby
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: |
+          URL="https://app.covallaby.com/api/v1/upload?repo=${{ github.repository }}&branch=${{ github.head_ref || github.ref_name }}&commit=${{ github.event.pull_request.head.sha || github.sha }}"
+          [ -n "${{ github.event.pull_request.number }}" ] && URL="${URL}&pr=${{ github.event.pull_request.number }}"
+          curl -sf -X POST "$URL" \
+            -H "Authorization: Bearer ${{ secrets.COVALLABY_TOKEN }}" \
+            --data-binary @coverage/lcov.info
 
       - name: Check formatting
         run: dart format --output=none --set-exit-if-changed .
