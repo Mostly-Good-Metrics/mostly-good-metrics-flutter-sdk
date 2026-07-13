@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -33,11 +34,15 @@ abstract class NetworkClient {
     MGMConfiguration config,
   );
 
-  /// Fetch experiments for a user.
+  /// Fetch server-assigned experiment variants for a user.
+  ///
+  /// [anonymousId] is included when the user is identified so the server
+  /// can link prior anonymous assignments.
   Future<ExperimentsResult> fetchExperiments(
     String userId,
-    MGMConfiguration config,
-  );
+    MGMConfiguration config, {
+    String? anonymousId,
+  });
 
   /// Check if we're currently rate limited.
   bool isRateLimited();
@@ -155,11 +160,15 @@ class HttpNetworkClient implements NetworkClient {
   @override
   Future<ExperimentsResult> fetchExperiments(
     String userId,
-    MGMConfiguration config,
-  ) async {
+    MGMConfiguration config, {
+    String? anonymousId,
+  }) async {
     final encodedUserId = Uri.encodeComponent(userId);
-    final url =
-        Uri.parse('${config.baseUrl}/v1/experiments?user_id=$encodedUserId');
+    var query = 'user_id=$encodedUserId';
+    if (anonymousId != null) {
+      query += '&anonymous_id=${Uri.encodeComponent(anonymousId)}';
+    }
+    final url = Uri.parse('${config.baseUrl}/v1/experiments?$query');
 
     MGMLogger.debug('Fetching experiments for user $userId from $url');
 
@@ -169,7 +178,7 @@ class HttpNetworkClient implements NetworkClient {
         url,
         headers: {
           'Content-Type': 'application/json',
-          'X-MGM-Key': config.apiKey,
+          'Authorization': 'Bearer ${config.apiKey}',
           'User-Agent': 'MostlyGoodMetrics-Flutter/$sdkVersion',
           'X-MGM-SDK': 'flutter',
           'X-MGM-SDK-Version': sdkVersion,
@@ -243,6 +252,13 @@ class MockNetworkClient implements NetworkClient {
   /// Track fetch calls for testing.
   final List<String> experimentsFetchedForUsers = [];
 
+  /// Track anonymous IDs passed to fetchExperiments (null when omitted).
+  final List<String?> experimentsFetchedWithAnonymousIds = [];
+
+  /// Optional gate: when set, fetchExperiments waits on this future before
+  /// returning (use to simulate slow or hanging fetches in tests).
+  Completer<void>? experimentsFetchGate;
+
   @override
   Future<SendResult> sendEvents(
     EventsPayload payload,
@@ -255,9 +271,14 @@ class MockNetworkClient implements NetworkClient {
   @override
   Future<ExperimentsResult> fetchExperiments(
     String userId,
-    MGMConfiguration config,
-  ) async {
+    MGMConfiguration config, {
+    String? anonymousId,
+  }) async {
     experimentsFetchedForUsers.add(userId);
+    experimentsFetchedWithAnonymousIds.add(anonymousId);
+    if (experimentsFetchGate != null) {
+      await experimentsFetchGate!.future;
+    }
     return ExperimentsResult(
       assignedVariants: experimentsToReturn,
       success: experimentsSuccess,

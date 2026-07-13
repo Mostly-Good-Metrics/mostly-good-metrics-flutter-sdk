@@ -16,6 +16,7 @@ A lightweight Flutter SDK for tracking analytics events with [MostlyGoodMetrics]
 - [Automatic Events](#automatic-events)
 - [Automatic Context](#automatic-context)
 - [Automatic Behavior](#automatic-behavior)
+- [A/B Testing (Experiments)](#ab-testing-experiments)
 - [Manual Flush](#manual-flush)
 - [Session Management](#session-management)
 - [Debug Logging](#debug-logging)
@@ -264,6 +265,41 @@ The SDK automatically handles common tasks so you can focus on tracking what mat
 - **Retry on failure** - Failed requests are retried; events are preserved until successfully sent
 - **Session management** - New session ID generated on each app launch
 - **Deduplication** - Events include unique IDs (`client_event_id`) to prevent duplicate processing
+
+## A/B Testing (Experiments)
+
+Variants are assigned by the MostlyGoodMetrics server — the SDK never buckets users locally. Assignments are fetched in the background at configure (never blocking), cached per user in `shared_preferences` with no expiry, and refreshed at most about once per hour (stale-while-revalidate).
+
+**Read a variant:**
+
+```dart
+// Synchronous, never throws, never blocks.
+// Returns the fallback (default null) when the experiment is unknown
+// or assignments haven't loaded yet.
+final variant = MostlyGoodMetrics.getVariant(
+  'checkout-flow',
+  fallback: 'control',
+);
+
+if (variant == 'treatment') {
+  // Show treatment UI
+}
+```
+
+**Wait for assignments to load (optional):**
+
+```dart
+// Completes when the initial load attempt finishes (success or failure),
+// or when the timeout elapses - whichever comes first. Never hangs.
+final loaded = await MostlyGoodMetrics.ready(
+  timeout: Duration(seconds: 2),
+);
+```
+
+**Behavior:**
+- Reading a variant sets the super property `$experiment_{snake_case(name)}` so the variant is attached to all subsequent events
+- Reading a variant tracks a `$experiment_exposure` event (`experiment`, `variant`) once per user/experiment/variant — the dedup is persisted and survives app restarts
+- After `identify()` with a new user ID, the SDK keeps serving the current variants and refetches assignments for the new user (linking the stored anonymous ID); the new assignments are swapped in atomically when the response arrives
 
 ## Manual Flush
 
