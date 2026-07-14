@@ -63,7 +63,7 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
   static const int _experimentsRefetchIntervalMs = 60 * 60 * 1000;
 
   /// Default timeout for [ready].
-  static const Duration defaultReadyTimeout = Duration(seconds: 10);
+  static const Duration defaultReadyTimeout = Duration(seconds: 5);
 
   /// The effective user ID to use in events (identified user or anonymous).
   String? get _effectiveUserId => _userId ?? _anonymousId;
@@ -322,7 +322,7 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
     // background, including the stored anonymous ID so the server can
     // migrate prior anonymous assignments.
     if (previousUserId != userId) {
-      unawaited(mgm._fetchExperiments(anonymousId: mgm._anonymousId));
+      unawaited(mgm._fetchExperiments());
     }
 
     // If profile data is provided, check if we should send $identify event
@@ -569,13 +569,18 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
   ///
   /// On failure the currently served variants are kept untouched — they are
   /// never cleared mid-session.
-  Future<void> _fetchExperiments({String? anonymousId}) async {
+  Future<void> _fetchExperiments() async {
     try {
       final userId = _effectiveUserId;
       if (userId == null) {
         MGMLogger.debug('No user ID available, skipping experiments fetch');
         return;
       }
+
+      // Link the stored anonymous ID on every fetch while identified (the
+      // effective user ID differs from the stored anonymous ID), so the
+      // server can migrate prior anonymous assignments. Mirrors the JS SDK.
+      final anonymousId = userId != _anonymousId ? _anonymousId : null;
 
       final result = await _networkClient!.fetchExperiments(
         userId,

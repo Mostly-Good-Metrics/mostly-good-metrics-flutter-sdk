@@ -203,8 +203,11 @@ void main() {
 
   group('MGMUtils.toSnakeCase', () {
     test('converts spaces to underscores', () {
-      expect(MGMUtils.toSnakeCase('My Experiment'), 'my_experiment');
-      expect(MGMUtils.toSnakeCase('User Signed Up'), 'user_signed_up');
+      // An uppercase letter after a space yields a double underscore
+      // (underscore inserted before the uppercase, plus the space).
+      expect(MGMUtils.toSnakeCase('My Experiment'), 'my__experiment');
+      expect(MGMUtils.toSnakeCase('User Signed Up'), 'user__signed__up');
+      expect(MGMUtils.toSnakeCase('my experiment'), 'my_experiment');
     });
 
     test('converts hyphens to underscores', () {
@@ -238,6 +241,20 @@ void main() {
 
     test('handles mixed formats', () {
       expect(MGMUtils.toSnakeCase('My camelCase-test'), 'my_camel_case_test');
+    });
+
+    test('matches the JS reference transform byte-for-byte', () {
+      expect(MGMUtils.toSnakeCase('Pricing-Test V2'), 'pricing__test__v2');
+      expect(MGMUtils.toSnakeCase('A-B-Test'), 'a__b__test');
+      expect(MGMUtils.toSnakeCase('ABTest'), 'a_b_test');
+      expect(MGMUtils.toSnakeCase('button-color'), 'button_color');
+      expect(MGMUtils.toSnakeCase('myExperiment2'), 'my_experiment2');
+      expect(MGMUtils.toSnakeCase('a--b'), 'a_b');
+    });
+
+    test('does not transform other punctuation', () {
+      expect(MGMUtils.toSnakeCase('exp.name'), 'exp.name');
+      expect(MGMUtils.toSnakeCase('exp/name!'), 'exp/name!');
     });
   });
 }

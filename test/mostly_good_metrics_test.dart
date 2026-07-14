@@ -640,7 +640,7 @@ void main() {
       await Future<void>.delayed(Duration.zero);
 
       final superProps = MostlyGoodMetrics.getSuperProperties();
-      expect(superProps[r'$experiment_my_experiment'], 'treatment');
+      expect(superProps[r'$experiment_my__experiment'], 'treatment');
     });
 
     test('sets snake_case super property for camelCase experiment name',
@@ -801,6 +801,13 @@ void main() {
         false,
       );
     });
+
+    test('default timeout is 5 seconds', () {
+      expect(
+        MostlyGoodMetrics.defaultReadyTimeout,
+        const Duration(seconds: 5),
+      );
+    });
   });
 
   group('A/B Testing - caching', () {
@@ -953,6 +960,39 @@ void main() {
       // Atomic swap once the response arrives
       expect(MostlyGoodMetrics.getVariant('user_experiment'), 'user_variant');
       expect(MostlyGoodMetrics.getVariant('anon_experiment'), null);
+    });
+
+    test('background refetch includes anonymous_id while identified',
+        () async {
+      networkClient.experimentsToReturn = {'experiment': 'variant'};
+
+      await configureSDK();
+      await MostlyGoodMetrics.identify('user-123');
+      expect(await MostlyGoodMetrics.ready(), true);
+      await Future<void>.delayed(Duration.zero);
+
+      final anonymousId = MostlyGoodMetrics.anonymousId;
+
+      // Age the cache past the ~1h throttle and restart while identified
+      final twoHoursAgo = DateTime.now()
+          .subtract(const Duration(hours: 2))
+          .millisecondsSinceEpoch;
+      await stateStorage.setString(
+        'experimentsFetchedAt',
+        twoHoursAgo.toString(),
+      );
+
+      MostlyGoodMetrics.reset();
+      networkClient.experimentsFetchedForUsers.clear();
+      networkClient.experimentsFetchedWithAnonymousIds.clear();
+
+      await configureSDK();
+      expect(await MostlyGoodMetrics.ready(), true);
+
+      // Every fetch while identified links the stored anonymous ID,
+      // not only the identify()-triggered refetch.
+      expect(networkClient.experimentsFetchedForUsers, ['user-123']);
+      expect(networkClient.experimentsFetchedWithAnonymousIds, [anonymousId]);
     });
 
     test('does not refetch when identify called with same user', () async {
