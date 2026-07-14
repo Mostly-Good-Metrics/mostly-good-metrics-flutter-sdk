@@ -50,15 +50,35 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
   static const String _superPropertiesKey = 'superProperties';
   static const String _identifyHashKey = 'identifyHash';
   static const String _identifyTimestampKey = 'identifyTimestamp';
+  static const String _experimentsKey = 'experiments';
+  static const String _experimentsUserIdKey = 'experimentsUserId';
+  static const String _experimentsFetchedAtKey = 'experimentsFetchedAt';
+  static const String _experimentExposuresKey = 'experimentExposures';
 
   // 24 hours in milliseconds
   static const int _twentyFourHoursMs = 24 * 60 * 60 * 1000;
+
+  // Background refetches of experiment variants are throttled to ~1 hour.
+  // The cached variants themselves never expire (stale-while-revalidate).
+  static const int _experimentsRefetchIntervalMs = 60 * 60 * 1000;
+
+  /// Default timeout for [ready].
+  static const Duration defaultReadyTimeout = Duration(seconds: 5);
 
   /// The effective user ID to use in events (identified user or anonymous).
   String? get _effectiveUserId => _userId ?? _anonymousId;
 
   // In-memory cache for super properties
   Map<String, dynamic> _superProperties = {};
+
+  // A/B testing state. Variants are only ever assigned by the server —
+  // the SDK never buckets locally.
+  Map<String, String> _assignedVariants = {};
+  Completer<void>? _experimentsReadyCompleter;
+  bool _experimentsLoaded = false;
+
+  // Exposure dedup ("userId|experiment|variant"), persisted to storage.
+  Set<String> _trackedExposures = {};
 
   MostlyGoodMetrics._internal();
 
@@ -127,6 +147,9 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
       track(r'$app_opened');
     }
 
+    // Initialize experiments (async, don't block configure)
+    mgm._initializeExperiments();
+
     MGMLogger.debug('MostlyGoodMetrics SDK configured successfully');
   }
 
@@ -156,6 +179,20 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
       } catch (e) {
         MGMLogger.warning('Failed to restore super properties: $e');
         _superProperties = {};
+      }
+    }
+
+    // Restore exposure dedup state
+    _trackedExposures = {};
+    final exposuresJson =
+        await _stateStorage!.getString(_experimentExposuresKey);
+    if (exposuresJson != null) {
+      try {
+        _trackedExposures = (json.decode(exposuresJson) as List<dynamic>)
+            .map((e) => e.toString())
+            .toSet();
+      } catch (e) {
+        MGMLogger.warning('Failed to restore experiment exposures: $e');
       }
     }
   }
@@ -267,13 +304,26 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
   /// Optional [profile] data (email, name) is sent to the backend via the
   /// $identify event. Debouncing: only sends $identify if payload changed
   /// or >24h since last send.
+  ///
+  /// If the user ID changes, experiment variants are refetched for the new
+  /// user (linking the stored anonymous ID). The currently served variants
+  /// stay in place until the response arrives, then are swapped atomically —
+  /// they are never cleared mid-session.
   static Future<void> identify(String userId, {UserProfile? profile}) async {
     _ensureConfigured();
 
     final mgm = instance;
+    final previousUserId = mgm._userId;
     mgm._userId = userId;
     await mgm._stateStorage!.setString(_userIdKey, userId);
     MGMLogger.debug('Identified user: $userId');
+
+    // If the user changed, refetch variants for the new user in the
+    // background, including the stored anonymous ID so the server can
+    // migrate prior anonymous assignments.
+    if (previousUserId != userId) {
+      unawaited(mgm._fetchExperiments());
+    }
 
     // If profile data is provided, check if we should send $identify event
     if (profile != null && (profile.email != null || profile.name != null)) {
@@ -426,8 +476,274 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
   }
 
   Future<void> _saveSuperProperties() async {
-    final json = jsonEncode(_superProperties);
-    await _stateStorage!.setString(_superPropertiesKey, json);
+    final jsonStr = jsonEncode(_superProperties);
+    await _stateStorage!.setString(_superPropertiesKey, jsonStr);
+  }
+
+  // A/B Testing Methods
+
+  /// Initialize experiments: serve the persisted per-user cache immediately
+  /// (stale-while-revalidate — the cache never expires), then refresh from
+  /// the server in the background, throttled to roughly once per hour.
+  /// Never blocks configure().
+  Future<void> _initializeExperiments() async {
+    _experimentsReadyCompleter = Completer<void>();
+    _experimentsLoaded = false;
+
+    try {
+      // Serve the cached variants immediately, however old they are.
+      final cachedExperiments = await _restoreExperimentsFromCache();
+      if (cachedExperiments != null) {
+        _assignedVariants = cachedExperiments;
+        MGMLogger.debug('Restored experiments from cache: $_assignedVariants');
+      }
+
+      // Background refetch, throttled to ~1h since the last fetch.
+      if (await _shouldRefetchExperiments()) {
+        await _fetchExperiments();
+      } else {
+        MGMLogger.debug(
+          'Skipping experiments refetch (throttled), serving cached variants',
+        );
+        _experimentsLoaded = true;
+        _completeExperimentsReady();
+      }
+    } catch (e) {
+      MGMLogger.error('Error initializing experiments', e);
+      _experimentsLoaded = true;
+      _completeExperimentsReady();
+    }
+  }
+
+  void _completeExperimentsReady() {
+    if (!(_experimentsReadyCompleter?.isCompleted ?? true)) {
+      _experimentsReadyCompleter!.complete();
+    }
+  }
+
+  /// Restore experiment variants from the per-user cache.
+  ///
+  /// The cache has no expiry — it is only skipped when it belongs to a
+  /// different user.
+  Future<Map<String, String>?> _restoreExperimentsFromCache() async {
+    final cachedUserId = await _stateStorage!.getString(_experimentsUserIdKey);
+    final experimentsJson = await _stateStorage!.getString(_experimentsKey);
+
+    // Check if cache exists
+    if (cachedUserId == null || experimentsJson == null) {
+      return null;
+    }
+
+    // Check if user matches
+    if (cachedUserId != _effectiveUserId) {
+      MGMLogger.debug('Experiments cache user mismatch, will refetch');
+      return null;
+    }
+
+    // Parse cached experiments
+    try {
+      final decoded = json.decode(experimentsJson) as Map<String, dynamic>;
+      return decoded.map((key, value) => MapEntry(key, value.toString()));
+    } catch (e) {
+      MGMLogger.warning('Failed to parse cached experiments: $e');
+      return null;
+    }
+  }
+
+  /// Whether a background refetch is due (more than ~1h since the last
+  /// fetch for the current user).
+  Future<bool> _shouldRefetchExperiments() async {
+    final cachedUserId = await _stateStorage!.getString(_experimentsUserIdKey);
+    if (cachedUserId != _effectiveUserId) return true;
+
+    final fetchedAtStr =
+        await _stateStorage!.getString(_experimentsFetchedAtKey);
+    final fetchedAt = fetchedAtStr != null ? int.tryParse(fetchedAtStr) : null;
+    if (fetchedAt == null) return true;
+
+    final now = DateTime.now().millisecondsSinceEpoch;
+    return (now - fetchedAt) > _experimentsRefetchIntervalMs;
+  }
+
+  /// Fetch server-assigned variants and swap them in atomically on success.
+  ///
+  /// On failure the currently served variants are kept untouched — they are
+  /// never cleared mid-session.
+  Future<void> _fetchExperiments() async {
+    try {
+      final userId = _effectiveUserId;
+      if (userId == null) {
+        MGMLogger.debug('No user ID available, skipping experiments fetch');
+        return;
+      }
+
+      // Link the stored anonymous ID on every fetch while identified (the
+      // effective user ID differs from the stored anonymous ID), so the
+      // server can migrate prior anonymous assignments. Mirrors the JS SDK.
+      final anonymousId = userId != _anonymousId ? _anonymousId : null;
+
+      final result = await _networkClient!.fetchExperiments(
+        userId,
+        _config!,
+        anonymousId: anonymousId,
+      );
+
+      if (result.success && result.assignedVariants != null) {
+        // Atomic swap: a single map assignment, never a clear-then-set.
+        _assignedVariants = result.assignedVariants!;
+        await _cacheExperiments(userId, _assignedVariants);
+        MGMLogger.debug('Fetched and cached experiments: $_assignedVariants');
+      } else {
+        MGMLogger.warning(
+          'Failed to fetch experiments, keeping current variants',
+        );
+      }
+    } catch (e) {
+      MGMLogger.error('Error fetching experiments', e);
+    } finally {
+      _experimentsLoaded = true;
+      _completeExperimentsReady();
+    }
+  }
+
+  /// Cache experiments to persistent storage (per user, no expiry).
+  Future<void> _cacheExperiments(
+    String userId,
+    Map<String, String> variants,
+  ) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await _stateStorage!.setString(_experimentsUserIdKey, userId);
+    await _stateStorage!.setString(_experimentsFetchedAtKey, now.toString());
+    await _stateStorage!.setString(_experimentsKey, jsonEncode(variants));
+  }
+
+  /// Get the server-assigned variant for an experiment.
+  ///
+  /// Variants are always assigned by the server — the SDK never buckets
+  /// locally. This method is synchronous and non-blocking: it reads from the
+  /// in-memory cache (hydrated from persistent storage at configure) and
+  /// returns [fallback] (default null) when the experiment is unknown,
+  /// assignments haven't loaded yet, or the SDK is not configured.
+  /// It never throws.
+  ///
+  /// Reading a variant also:
+  /// - sets the super property `$experiment_{snake_case(name)}` so the
+  ///   variant is attached to all subsequent events
+  /// - tracks a `$experiment_exposure` event once per
+  ///   (user, experiment, variant), persisted across restarts
+  ///
+  /// Example:
+  /// ```dart
+  /// final variant = MostlyGoodMetrics.getVariant(
+  ///   'My Experiment',
+  ///   fallback: 'control',
+  /// );
+  /// if (variant == 'treatment') {
+  ///   // Show treatment UI
+  /// }
+  /// ```
+  static String? getVariant(String experimentName, {String? fallback}) {
+    try {
+      if (!_isConfigured) {
+        MGMLogger.warning('getVariant called before configure()');
+        return fallback;
+      }
+
+      final mgm = instance;
+      final variant = mgm._assignedVariants[experimentName];
+
+      if (variant == null) {
+        MGMLogger.debug('getVariant($experimentName) = fallback ($fallback)');
+        return fallback;
+      }
+
+      mgm._recordExposure(experimentName, variant);
+      MGMLogger.debug('getVariant($experimentName) = $variant');
+      return variant;
+    } catch (e) {
+      MGMLogger.warning('getVariant($experimentName) failed: $e');
+      return fallback;
+    }
+  }
+
+  /// Set the experiment super property and track the `$experiment_exposure`
+  /// event, deduplicated per (user, experiment, variant). The dedup state is
+  /// persisted so it survives app restarts.
+  void _recordExposure(String experimentName, String variant) {
+    final snakeCaseName = MGMUtils.toSnakeCase(experimentName);
+    final propertyKey = '\$experiment_$snakeCaseName';
+    if (_superProperties[propertyKey] != variant) {
+      _superProperties[propertyKey] = variant;
+      // Persist asynchronously - don't await to keep getVariant sync
+      unawaited(_saveSuperProperties());
+    }
+
+    final exposureKey = '$_effectiveUserId|$experimentName|$variant';
+    if (_trackedExposures.contains(exposureKey)) return;
+    _trackedExposures.add(exposureKey);
+    unawaited(
+      _stateStorage!.setString(
+        _experimentExposuresKey,
+        jsonEncode(_trackedExposures.toList()),
+      ),
+    );
+
+    track(
+      r'$experiment_exposure',
+      properties: {
+        r'$experiment_name': experimentName,
+        r'$variant': variant,
+      },
+    );
+    MGMLogger.debug(
+      'Tracked exposure for experiment "$experimentName" variant "$variant"',
+    );
+  }
+
+  /// Returns a Future that completes when the initial experiments load
+  /// attempt has finished (success or failure), or when [timeout] elapses —
+  /// whichever comes first. No path hangs.
+  ///
+  /// Resolves to true if the load attempt completed, false if the timeout
+  /// elapsed first (or the SDK is not configured).
+  ///
+  /// Example:
+  /// ```dart
+  /// await MostlyGoodMetrics.configure(config);
+  /// final loaded = await MostlyGoodMetrics.ready(
+  ///   timeout: Duration(seconds: 2),
+  /// );
+  /// final variant = MostlyGoodMetrics.getVariant('onboarding_flow');
+  /// ```
+  static Future<bool> ready({Duration timeout = defaultReadyTimeout}) async {
+    if (!_isConfigured) {
+      MGMLogger.warning('ready() called before configure()');
+      return false;
+    }
+
+    final mgm = instance;
+    if (mgm._experimentsLoaded) {
+      return true;
+    }
+
+    final future = mgm._experimentsReadyCompleter?.future;
+    if (future == null) {
+      return true;
+    }
+
+    try {
+      await future.timeout(timeout);
+      return true;
+    } on TimeoutException {
+      MGMLogger.debug('ready() timed out after $timeout');
+      return false;
+    }
+  }
+
+  /// Check if experiments have been loaded.
+  static bool get experimentsLoaded {
+    if (!_isConfigured) return false;
+    return instance._experimentsLoaded;
   }
 
   /// Flush pending events to the server.
@@ -586,5 +902,11 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
     }
     _instance = null;
     _isConfigured = false;
+  }
+
+  /// Get the current assigned variants (for testing).
+  static Map<String, String> get assignedVariants {
+    _ensureConfigured();
+    return Map<String, String>.from(instance._assignedVariants);
   }
 }

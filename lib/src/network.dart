@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -10,6 +11,21 @@ import 'utils.dart';
 /// SDK version for metrics headers
 const String sdkVersion = '0.2.6';
 
+/// Result of fetching experiments from the API.
+class ExperimentsResult {
+  /// The assigned variants, keyed by experiment name.
+  final Map<String, String>? assignedVariants;
+
+  /// Whether the fetch was successful.
+  final bool success;
+
+  /// Creates a new experiments result.
+  const ExperimentsResult({
+    this.assignedVariants,
+    required this.success,
+  });
+}
+
 /// Abstract interface for the network client.
 abstract class NetworkClient {
   /// Send events to the API.
@@ -17,6 +33,16 @@ abstract class NetworkClient {
     EventsPayload payload,
     MGMConfiguration config,
   );
+
+  /// Fetch server-assigned experiment variants for a user.
+  ///
+  /// [anonymousId] is included when the user is identified so the server
+  /// can link prior anonymous assignments.
+  Future<ExperimentsResult> fetchExperiments(
+    String userId,
+    MGMConfiguration config, {
+    String? anonymousId,
+  });
 
   /// Check if we're currently rate limited.
   bool isRateLimited();
@@ -131,6 +157,79 @@ class HttpNetworkClient implements NetworkClient {
     MGMLogger.warning('Rate limited, retry after 60 seconds (default)');
   }
 
+  @override
+  Future<ExperimentsResult> fetchExperiments(
+    String userId,
+    MGMConfiguration config, {
+    String? anonymousId,
+  }) async {
+    final encodedUserId = Uri.encodeComponent(userId);
+    var query = 'user_id=$encodedUserId';
+    if (anonymousId != null) {
+      query += '&anonymous_id=${Uri.encodeComponent(anonymousId)}';
+    }
+    final url = Uri.parse('${config.baseUrl}/v1/experiments?$query');
+
+    MGMLogger.debug('Fetching experiments for user $userId from $url');
+
+    try {
+      final osVersion = MGMUtils.getOSVersion();
+      final response = await _client.get(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ${config.apiKey}',
+          'User-Agent': 'MostlyGoodMetrics-Flutter/$sdkVersion',
+          'X-MGM-SDK': 'flutter',
+          'X-MGM-SDK-Version': sdkVersion,
+          'X-MGM-Platform': MGMUtils.getPlatformName(),
+          if (osVersion != null) 'X-MGM-Platform-Version': osVersion,
+        },
+      );
+
+      MGMLogger.debug('Experiments response status: ${response.statusCode}');
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        try {
+          final data = json.decode(response.body) as Map<String, dynamic>;
+          final assignedVariants =
+              data['assigned_variants'] as Map<String, dynamic>?;
+          if (assignedVariants != null) {
+            final variants = assignedVariants.map(
+              (key, value) => MapEntry(key, value.toString()),
+            );
+            MGMLogger.debug('Fetched experiments: $variants');
+            return ExperimentsResult(
+              assignedVariants: variants,
+              success: true,
+            );
+          }
+          return const ExperimentsResult(
+            assignedVariants: {},
+            success: true,
+          );
+        } catch (e) {
+          MGMLogger.error('Failed to parse experiments response', e);
+          return const ExperimentsResult(success: false);
+        }
+      }
+
+      MGMLogger.warning(
+        'Failed to fetch experiments: ${response.statusCode} - ${response.body}',
+      );
+      return const ExperimentsResult(success: false);
+    } on SocketException catch (e) {
+      MGMLogger.error('Network error fetching experiments', e);
+      return const ExperimentsResult(success: false);
+    } on http.ClientException catch (e) {
+      MGMLogger.error('HTTP client error fetching experiments', e);
+      return const ExperimentsResult(success: false);
+    } catch (e) {
+      MGMLogger.error('Unknown error fetching experiments', e);
+      return const ExperimentsResult(success: false);
+    }
+  }
+
   /// Clear rate limiting state (for testing).
   void clearRateLimiting() {
     _retryAfterTime = null;
@@ -144,6 +243,22 @@ class MockNetworkClient implements NetworkClient {
   bool _rateLimited = false;
   DateTime? _retryAfterTime;
 
+  /// Mock experiments to return from fetchExperiments.
+  Map<String, String>? experimentsToReturn;
+
+  /// Whether fetchExperiments should succeed.
+  bool experimentsSuccess = true;
+
+  /// Track fetch calls for testing.
+  final List<String> experimentsFetchedForUsers = [];
+
+  /// Track anonymous IDs passed to fetchExperiments (null when omitted).
+  final List<String?> experimentsFetchedWithAnonymousIds = [];
+
+  /// Optional gate: when set, fetchExperiments waits on this future before
+  /// returning (use to simulate slow or hanging fetches in tests).
+  Completer<void>? experimentsFetchGate;
+
   @override
   Future<SendResult> sendEvents(
     EventsPayload payload,
@@ -151,6 +266,23 @@ class MockNetworkClient implements NetworkClient {
   ) async {
     sentPayloads.add(payload);
     return resultToReturn;
+  }
+
+  @override
+  Future<ExperimentsResult> fetchExperiments(
+    String userId,
+    MGMConfiguration config, {
+    String? anonymousId,
+  }) async {
+    experimentsFetchedForUsers.add(userId);
+    experimentsFetchedWithAnonymousIds.add(anonymousId);
+    if (experimentsFetchGate != null) {
+      await experimentsFetchGate!.future;
+    }
+    return ExperimentsResult(
+      assignedVariants: experimentsToReturn,
+      success: experimentsSuccess,
+    );
   }
 
   @override

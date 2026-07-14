@@ -200,4 +200,61 @@ void main() {
       expect(validPlatforms.contains(platform), true);
     });
   });
+
+  group('MGMUtils.toSnakeCase', () {
+    test('converts spaces to underscores', () {
+      // An uppercase letter after a space yields a double underscore
+      // (underscore inserted before the uppercase, plus the space).
+      expect(MGMUtils.toSnakeCase('My Experiment'), 'my__experiment');
+      expect(MGMUtils.toSnakeCase('User Signed Up'), 'user__signed__up');
+      expect(MGMUtils.toSnakeCase('my experiment'), 'my_experiment');
+    });
+
+    test('converts hyphens to underscores', () {
+      expect(MGMUtils.toSnakeCase('my-experiment'), 'my_experiment');
+      expect(MGMUtils.toSnakeCase('user-signed-up'), 'user_signed_up');
+    });
+
+    test('converts camelCase to snake_case', () {
+      expect(MGMUtils.toSnakeCase('myExperiment'), 'my_experiment');
+      expect(MGMUtils.toSnakeCase('userSignedUp'), 'user_signed_up');
+    });
+
+    test('converts PascalCase to snake_case', () {
+      expect(MGMUtils.toSnakeCase('MyExperiment'), 'my_experiment');
+      expect(MGMUtils.toSnakeCase('UserSignedUp'), 'user_signed_up');
+    });
+
+    test('handles already snake_case strings', () {
+      expect(MGMUtils.toSnakeCase('my_experiment'), 'my_experiment');
+      expect(MGMUtils.toSnakeCase('user_signed_up'), 'user_signed_up');
+    });
+
+    test('handles empty string', () {
+      expect(MGMUtils.toSnakeCase(''), '');
+    });
+
+    test('handles single word', () {
+      expect(MGMUtils.toSnakeCase('experiment'), 'experiment');
+      expect(MGMUtils.toSnakeCase('Experiment'), 'experiment');
+    });
+
+    test('handles mixed formats', () {
+      expect(MGMUtils.toSnakeCase('My camelCase-test'), 'my_camel_case_test');
+    });
+
+    test('matches the JS reference transform byte-for-byte', () {
+      expect(MGMUtils.toSnakeCase('Pricing-Test V2'), 'pricing__test__v2');
+      expect(MGMUtils.toSnakeCase('A-B-Test'), 'a__b__test');
+      expect(MGMUtils.toSnakeCase('ABTest'), 'a_b_test');
+      expect(MGMUtils.toSnakeCase('button-color'), 'button_color');
+      expect(MGMUtils.toSnakeCase('myExperiment2'), 'my_experiment2');
+      expect(MGMUtils.toSnakeCase('a--b'), 'a_b');
+    });
+
+    test('does not transform other punctuation', () {
+      expect(MGMUtils.toSnakeCase('exp.name'), 'exp.name');
+      expect(MGMUtils.toSnakeCase('exp/name!'), 'exp/name!');
+    });
+  });
 }
