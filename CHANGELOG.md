@@ -1,3 +1,10 @@
+## 0.3.0
+
+- A/B testing support: `getVariant(name, {fallback})` + `ready({timeout})` (never hangs)
+- Server-assigned variants with a shared_preferences-backed cache (stale-while-revalidate, no expiry)
+- Automatic `$experiment_exposure` events with persisted dedup
+- `anonymous_id` sent on identified experiment fetches (stable assignment across identify)
+
 ## 0.1.0
 
 - Initial release
