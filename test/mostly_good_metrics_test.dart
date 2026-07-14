@@ -681,9 +681,7 @@ void main() {
   group('A/B Testing - exposure tracking', () {
     Future<List<MGMEvent>> exposureEvents() async {
       final events = await eventStorage.fetchEvents(100);
-      return events
-          .where((e) => e.name == r'$experiment_exposure')
-          .toList();
+      return events.where((e) => e.name == r'$experiment_exposure').toList();
     }
 
     test(r'tracks $experiment_exposure once per user/experiment/variant',
@@ -962,8 +960,7 @@ void main() {
       expect(MostlyGoodMetrics.getVariant('anon_experiment'), null);
     });
 
-    test('background refetch includes anonymous_id while identified',
-        () async {
+    test('background refetch includes anonymous_id while identified', () async {
       networkClient.experimentsToReturn = {'experiment': 'variant'};
 
       await configureSDK();
@@ -1072,8 +1069,7 @@ void main() {
       MostlyGoodMetrics.track('button_clicked');
 
       final events = await eventStorage.fetchEvents(10);
-      final clickEvent =
-          events.firstWhere((e) => e.name == 'button_clicked');
+      final clickEvent = events.firstWhere((e) => e.name == 'button_clicked');
       expect(
         clickEvent.properties?[r'$experiment_button_test'],
         'blue_button',
