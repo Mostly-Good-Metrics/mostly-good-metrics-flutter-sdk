@@ -14,6 +14,8 @@ void main() {
       expect(config.maxStoredEvents, 10000);
       expect(config.enableDebugLogging, false);
       expect(config.trackAppLifecycleEvents, true);
+      expect(config.experimentMode, MGMExperimentMode.server);
+      expect(config.localExperiments, null);
       expect(config.optedOutByDefault, false);
       expect(config.collectDeviceProperties, true);
     });
@@ -65,6 +67,53 @@ void main() {
       expect(original.appVersion, null);
       expect(original.optedOutByDefault, false);
       expect(original.collectDeviceProperties, true);
+    });
+
+    test('copyWith updates experiment mode and local experiments', () {
+      const original = MGMConfiguration(apiKey: 'test-key');
+      const experiment = MGMExperimentConfig(
+        id: '7b1e8a90-4c2d-4f6a-9e3b-2a1d5c8f0e71',
+        name: 'button-color',
+        variants: ['control', 'treatment'],
+      );
+
+      final copied = original.copyWith(
+        experimentMode: MGMExperimentMode.local,
+        localExperiments: [experiment],
+      );
+
+      expect(copied.experimentMode, MGMExperimentMode.local);
+      expect(copied.localExperiments, [experiment]);
+      // Original should be unchanged
+      expect(original.experimentMode, MGMExperimentMode.server);
+      expect(original.localExperiments, null);
+    });
+  });
+
+  group('MGMExperimentConfig', () {
+    test('fromJson parses correctly', () {
+      final config = MGMExperimentConfig.fromJson({
+        'id': '7b1e8a90-4c2d-4f6a-9e3b-2a1d5c8f0e71',
+        'name': 'button-color',
+        'variants': ['a', 'b'],
+      });
+
+      expect(config.id, '7b1e8a90-4c2d-4f6a-9e3b-2a1d5c8f0e71');
+      expect(config.name, 'button-color');
+      expect(config.variants, ['a', 'b']);
+    });
+
+    test('toJson round-trips', () {
+      const config = MGMExperimentConfig(
+        id: '7b1e8a90-4c2d-4f6a-9e3b-2a1d5c8f0e71',
+        name: 'button-color',
+        variants: ['a', 'b'],
+      );
+
+      final roundTripped = MGMExperimentConfig.fromJson(config.toJson());
+      expect(roundTripped.id, config.id);
+      expect(roundTripped.name, config.name);
+      expect(roundTripped.variants, config.variants);
     });
   });
 

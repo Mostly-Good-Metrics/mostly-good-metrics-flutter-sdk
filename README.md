@@ -17,6 +17,7 @@ A lightweight Flutter SDK for tracking analytics events with [MostlyGoodMetrics]
 - [Automatic Context](#automatic-context)
 - [Automatic Behavior](#automatic-behavior)
 - [A/B Testing (Experiments)](#ab-testing-experiments)
+- [Local Experiment Enrollment](#local-experiment-enrollment)
 - [Manual Flush](#manual-flush)
 - [Session Management](#session-management)
 - [Privacy](#privacy)
@@ -124,6 +125,8 @@ await MostlyGoodMetrics.configure(
 | `maxStoredEvents` | `10000` | Max cached events |
 | `enableDebugLogging` | `false` | Enable debug output |
 | `trackAppLifecycleEvents` | `true` | Auto-track lifecycle events |
+| `experimentMode` | `MGMExperimentMode.server` | How experiment variants are assigned (see [Local Experiment Enrollment](#local-experiment-enrollment)) |
+| `localExperiments` | - | Inline experiment definitions for local mode (zero-network enrollment) |
 | `optedOutByDefault` | `false` | Start opted out (for consent-first apps) |
 | `collectDeviceProperties` | `true` | Collect device manufacturer, locale, and timezone |
 
@@ -277,7 +280,7 @@ The SDK automatically handles common tasks so you can focus on tracking what mat
 
 ## A/B Testing (Experiments)
 
-Variants are assigned by the MostlyGoodMetrics server — the SDK never buckets users locally. Assignments are fetched in the background at configure (never blocking), cached per user in `shared_preferences` with no expiry, and refreshed at most about once per hour (stale-while-revalidate).
+By default, variants are assigned by the MostlyGoodMetrics server (`MGMExperimentMode.server`). Assignments are fetched in the background at configure (never blocking), cached per user in `shared_preferences` with no expiry, and refreshed at most about once per hour (stale-while-revalidate). For on-device assignment, see [Local Experiment Enrollment](#local-experiment-enrollment).
 
 **Read a variant:**
 
@@ -309,6 +312,54 @@ final loaded = await MostlyGoodMetrics.ready(
 - Reading a variant sets the super property `$experiment_{snake_case(name)}` so the variant is attached to all subsequent events
 - Reading a variant tracks a `$experiment_exposure` event (`$experiment_name`, `$variant`) once per user/experiment/variant — the dedup is persisted and survives app restarts
 - After `identify()` with a new user ID, the SDK keeps serving the current variants and refetches assignments for the new user (linking the stored anonymous ID); the new assignments are swapped in atomically when the response arrives
+
+## Local Experiment Enrollment
+
+With `MGMExperimentMode.local`, variants are assigned **on device** by deterministically hashing the experiment ID and the effective user ID (the identified user ID, or the anonymous ID before `identify()`). The user ID never leaves the device for enrollment — a privacy benefit over server-side assignment, and it works offline.
+
+```dart
+await MostlyGoodMetrics.configure(
+  MGMConfiguration(
+    apiKey: 'mgm_proj_your_api_key',
+    experimentMode: MGMExperimentMode.local,
+  ),
+);
+
+// Same API as server mode
+final variant = MostlyGoodMetrics.getVariant(
+  'button-color',
+  fallback: 'control',
+);
+```
+
+In this mode the SDK fetches experiment *definitions* (IDs, names, and variant lists — no user data is sent) from `/v1/experiments/configs`, caches them, and refreshes them in the background about once per hour.
+
+**Zero-network option:** provide the experiment definitions inline and the SDK makes no experiment requests at all:
+
+```dart
+await MostlyGoodMetrics.configure(
+  MGMConfiguration(
+    apiKey: 'mgm_proj_your_api_key',
+    experimentMode: MGMExperimentMode.local,
+    localExperiments: [
+      MGMExperimentConfig(
+        id: '7b1e8a90-4c2d-4f6a-9e3b-2a1d5c8f0e71', // experiment UUID
+        name: 'button-color',
+        variants: ['control', 'treatment'],
+      ),
+    ],
+  ),
+);
+```
+
+**Behavior:**
+- Bucketing is deterministic: the variant is `variants[bucket % variants.length]`, where `bucket` is the first 8 bytes of `SHA-256("<experiment_uuid>:<user_id>")` as an unsigned big-endian 64-bit integer — identical across MostlyGoodMetrics SDKs
+- Assignments are **sticky**: the first variant read for an experiment is persisted (keyed by experiment UUID) and reused, including after `identify()` — the SDK never re-buckets a device
+- Exposure tracking works exactly as in server mode: super property, `$experiment_exposure` event, and per-user/experiment/variant dedup
+- While opted out (see [Privacy](#privacy)), local mode makes zero network requests — no config fetches — and records no exposures; bucketing from inline or previously cached definitions keeps working
+- A full "forget me" (`resetIdentity(clearAnonymousId: true)`) clears the sticky assignments so the new identity is re-bucketed fresh; a plain `resetIdentity()` keeps them
+
+**Cross-device caveat:** because enrollment is keyed to the effective user ID at first read (often the per-device anonymous ID) and assignments are sticky per device, the same person may receive different variants on different devices. Server mode can link anonymous and identified assignments across devices; local mode cannot. Prefer server mode when consistent cross-device assignment matters more than keeping user IDs on device.
 
 ## Manual Flush
 
@@ -392,6 +443,8 @@ await MostlyGoodMetrics.optIn();
 
 A persisted opt-in/opt-out choice always takes precedence over `optedOutByDefault`.
 
+While opted out, [local experiment enrollment](#local-experiment-enrollment) makes no config fetches (zero network) and records no exposure events or dedup state — `getVariant()` keeps working from inline or cached definitions, and the first read after `optIn()` records the exposure.
+
 ### Rotating the anonymous ID
 
 Generate a fresh anonymous ID so future events can't be linked to earlier anonymous activity:
@@ -408,7 +461,7 @@ For a complete local reset (e.g., a user deletes their account):
 await MostlyGoodMetrics.resetIdentity(clearAnonymousId: true);
 ```
 
-This clears the user ID, rotates the anonymous ID, deletes all pending (unsent) events, clears all super properties, and starts a new session — nothing tracked afterwards can be linked to the previous user.
+This clears the user ID, rotates the anonymous ID, deletes all pending (unsent) events, clears all super properties, clears sticky local experiment assignments (so the new identity is re-bucketed fresh, see [Local Experiment Enrollment](#local-experiment-enrollment)), and starts a new session — nothing tracked afterwards can be linked to the previous user.
 
 ### Limiting device properties
 
