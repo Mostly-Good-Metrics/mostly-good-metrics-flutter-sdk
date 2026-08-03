@@ -927,8 +927,7 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
         deviceManufacturer: _config!.collectDeviceProperties
             ? MGMUtils.getDeviceManufacturer()
             : null,
-        locale:
-            _config!.collectDeviceProperties ? MGMUtils.getLocale() : null,
+        locale: _config!.collectDeviceProperties ? MGMUtils.getLocale() : null,
         timezone:
             _config!.collectDeviceProperties ? MGMUtils.getTimezone() : null,
       ),
