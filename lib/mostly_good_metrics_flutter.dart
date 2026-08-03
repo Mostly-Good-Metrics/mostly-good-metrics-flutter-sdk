@@ -26,6 +26,7 @@
 /// ```
 library mostly_good_metrics_flutter;
 
+export 'src/bucketing.dart' show MGMBucketing;
 export 'src/mostly_good_metrics.dart' show MostlyGoodMetrics;
 export 'src/types.dart'
     show
@@ -33,6 +34,8 @@ export 'src/types.dart'
         MGMEvent,
         MGMError,
         MGMErrorType,
+        MGMExperimentConfig,
+        MGMExperimentMode,
         SendResult,
         EventsPayload,
         EventContext,
@@ -46,4 +49,9 @@ export 'src/storage.dart'
         InMemoryEventStorage,
         InMemoryStateStorage;
 export 'src/network.dart'
-    show NetworkClient, HttpNetworkClient, MockNetworkClient, ExperimentsResult;
+    show
+        NetworkClient,
+        HttpNetworkClient,
+        MockNetworkClient,
+        ExperimentsResult,
+        ExperimentConfigsResult;

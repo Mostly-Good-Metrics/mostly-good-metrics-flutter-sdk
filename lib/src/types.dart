@@ -1,3 +1,52 @@
+/// How experiment variants are assigned.
+enum MGMExperimentMode {
+  /// Variants are assigned by the MostlyGoodMetrics server (default).
+  server,
+
+  /// Variants are assigned on device by deterministically hashing the
+  /// experiment ID and user ID. The user ID never leaves the device for
+  /// enrollment.
+  local,
+}
+
+/// An experiment definition used for local (on-device) enrollment.
+class MGMExperimentConfig {
+  /// The experiment's unique ID (UUID).
+  final String id;
+
+  /// The experiment name, as used with `getVariant()`.
+  final String name;
+
+  /// The variant names, in server-defined order.
+  final List<String> variants;
+
+  /// Creates a new experiment config.
+  const MGMExperimentConfig({
+    required this.id,
+    required this.name,
+    required this.variants,
+  });
+
+  /// Creates an experiment config from a JSON map.
+  factory MGMExperimentConfig.fromJson(Map<String, dynamic> json) {
+    return MGMExperimentConfig(
+      id: json['id'] as String,
+      name: json['name'] as String,
+      variants:
+          (json['variants'] as List<dynamic>).map((v) => v.toString()).toList(),
+    );
+  }
+
+  /// Converts this experiment config to a JSON map.
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'variants': variants,
+    };
+  }
+}
+
 /// Configuration options for the MostlyGoodMetrics SDK.
 class MGMConfiguration {
   /// The API key for authenticating with MostlyGoodMetrics.
@@ -27,6 +76,16 @@ class MGMConfiguration {
   /// Whether to automatically track app lifecycle events.
   final bool trackAppLifecycleEvents;
 
+  /// How experiment variants are assigned (server-assigned by default).
+  final MGMExperimentMode experimentMode;
+
+  /// Inline experiment definitions for [MGMExperimentMode.local].
+  ///
+  /// When provided (with local mode), the SDK enrolls entirely on device
+  /// with zero network requests for experiments. When omitted, local mode
+  /// fetches the experiment definitions from `/v1/experiments/configs`.
+  final List<MGMExperimentConfig>? localExperiments;
+
   /// Creates a new configuration for MostlyGoodMetrics.
   const MGMConfiguration({
     required this.apiKey,
@@ -38,6 +97,8 @@ class MGMConfiguration {
     this.maxStoredEvents = 10000,
     this.enableDebugLogging = false,
     this.trackAppLifecycleEvents = true,
+    this.experimentMode = MGMExperimentMode.server,
+    this.localExperiments,
   })  : assert(maxBatchSize >= 1 && maxBatchSize <= 1000),
         assert(flushInterval >= 1),
         assert(maxStoredEvents >= 100);
@@ -53,6 +114,8 @@ class MGMConfiguration {
     int? maxStoredEvents,
     bool? enableDebugLogging,
     bool? trackAppLifecycleEvents,
+    MGMExperimentMode? experimentMode,
+    List<MGMExperimentConfig>? localExperiments,
   }) {
     return MGMConfiguration(
       apiKey: apiKey ?? this.apiKey,
@@ -65,6 +128,8 @@ class MGMConfiguration {
       enableDebugLogging: enableDebugLogging ?? this.enableDebugLogging,
       trackAppLifecycleEvents:
           trackAppLifecycleEvents ?? this.trackAppLifecycleEvents,
+      experimentMode: experimentMode ?? this.experimentMode,
+      localExperiments: localExperiments ?? this.localExperiments,
     );
   }
 }

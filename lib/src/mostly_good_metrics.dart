@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/widgets.dart';
 
+import 'bucketing.dart';
 import 'logger.dart';
 import 'network.dart';
 import 'storage.dart';
@@ -54,6 +55,15 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
   static const String _experimentsUserIdKey = 'experimentsUserId';
   static const String _experimentsFetchedAtKey = 'experimentsFetchedAt';
   static const String _experimentExposuresKey = 'experimentExposures';
+  static const String _localExperimentConfigsKey = 'localExperimentConfigs';
+  static const String _localExperimentConfigsFetchedAtKey =
+      'localExperimentConfigsFetchedAt';
+  // Sticky local assignments (experiment UUID -> variant).
+  // TODO(privacy-controls): when feat/privacy-controls merges, its
+  // forget-me / anonymous-ID-rotation flow must also clear this key so a
+  // new identity is re-bucketed instead of reusing the old assignments.
+  static const String _localExperimentAssignmentsKey =
+      'localExperimentAssignments';
 
   // 24 hours in milliseconds
   static const int _twentyFourHoursMs = 24 * 60 * 60 * 1000;
@@ -71,11 +81,19 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
   // In-memory cache for super properties
   Map<String, dynamic> _superProperties = {};
 
-  // A/B testing state. Variants are only ever assigned by the server —
-  // the SDK never buckets locally.
+  // A/B testing state. In server mode variants are assigned by the server;
+  // in local mode they are bucketed on device from experiment configs.
   Map<String, String> _assignedVariants = {};
   Completer<void>? _experimentsReadyCompleter;
   bool _experimentsLoaded = false;
+
+  // Local enrollment state: experiment configs keyed by name, and sticky
+  // assignments keyed by experiment UUID.
+  Map<String, MGMExperimentConfig> _localExperimentsByName = {};
+  Map<String, String> _localAssignments = {};
+
+  bool get _isLocalExperimentMode =>
+      _config?.experimentMode == MGMExperimentMode.local;
 
   // Exposure dedup ("userId|experiment|variant"), persisted to storage.
   Set<String> _trackedExposures = {};
@@ -320,8 +338,9 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
 
     // If the user changed, refetch variants for the new user in the
     // background, including the stored anonymous ID so the server can
-    // migrate prior anonymous assignments.
-    if (previousUserId != userId) {
+    // migrate prior anonymous assignments. In local mode assignments are
+    // sticky per experiment — the SDK never re-buckets after identify().
+    if (previousUserId != userId && !mgm._isLocalExperimentMode) {
       unawaited(mgm._fetchExperiments());
     }
 
@@ -490,6 +509,11 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
     _experimentsReadyCompleter = Completer<void>();
     _experimentsLoaded = false;
 
+    if (_isLocalExperimentMode) {
+      await _initializeLocalExperiments();
+      return;
+    }
+
     try {
       // Serve the cached variants immediately, however old they are.
       final cachedExperiments = await _restoreExperimentsFromCache();
@@ -617,10 +641,198 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
     await _stateStorage!.setString(_experimentsKey, jsonEncode(variants));
   }
 
-  /// Get the server-assigned variant for an experiment.
+  // Local experiment enrollment
+
+  /// Initialize experiments for [MGMExperimentMode.local]: restore sticky
+  /// assignments, then load experiment configs — inline from the
+  /// configuration when provided (zero network), otherwise cached configs
+  /// are served immediately and refreshed from the server in the
+  /// background, throttled like server-mode assignments. Never blocks
+  /// configure().
+  Future<void> _initializeLocalExperiments() async {
+    try {
+      await _restoreLocalAssignments();
+
+      final inlineExperiments = _config!.localExperiments;
+      if (inlineExperiments != null) {
+        _setLocalExperimentConfigs(inlineExperiments);
+        MGMLogger.debug(
+          'Using ${inlineExperiments.length} inline local experiments',
+        );
+        _experimentsLoaded = true;
+        _completeExperimentsReady();
+        return;
+      }
+
+      // Serve cached configs immediately, however old they are.
+      final cachedConfigs = await _restoreLocalConfigsFromCache();
+      if (cachedConfigs != null) {
+        _setLocalExperimentConfigs(cachedConfigs);
+        MGMLogger.debug(
+          'Restored ${cachedConfigs.length} local experiment configs '
+          'from cache',
+        );
+      }
+
+      // Background refetch, throttled to ~1h since the last fetch.
+      if (await _shouldRefetchLocalConfigs()) {
+        await _fetchLocalExperimentConfigs();
+      } else {
+        MGMLogger.debug(
+          'Skipping local experiment configs refetch (throttled), '
+          'serving cached configs',
+        );
+        _experimentsLoaded = true;
+        _completeExperimentsReady();
+      }
+    } catch (e) {
+      MGMLogger.error('Error initializing local experiments', e);
+      _experimentsLoaded = true;
+      _completeExperimentsReady();
+    }
+  }
+
+  void _setLocalExperimentConfigs(List<MGMExperimentConfig> configs) {
+    _localExperimentsByName = {
+      for (final config in configs) config.name: config,
+    };
+  }
+
+  /// Restore sticky local assignments (experiment UUID -> variant).
+  Future<void> _restoreLocalAssignments() async {
+    _localAssignments = {};
+    final assignmentsJson =
+        await _stateStorage!.getString(_localExperimentAssignmentsKey);
+    if (assignmentsJson == null) return;
+    try {
+      final decoded = json.decode(assignmentsJson) as Map<String, dynamic>;
+      _localAssignments =
+          decoded.map((key, value) => MapEntry(key, value.toString()));
+    } catch (e) {
+      MGMLogger.warning('Failed to restore local experiment assignments: $e');
+    }
+  }
+
+  Future<void> _saveLocalAssignments() async {
+    await _stateStorage!.setString(
+      _localExperimentAssignmentsKey,
+      jsonEncode(_localAssignments),
+    );
+  }
+
+  /// Restore local experiment configs from the cache (no expiry).
+  Future<List<MGMExperimentConfig>?> _restoreLocalConfigsFromCache() async {
+    final configsJson =
+        await _stateStorage!.getString(_localExperimentConfigsKey);
+    if (configsJson == null) return null;
+    try {
+      return (json.decode(configsJson) as List<dynamic>)
+          .map((e) => MGMExperimentConfig.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      MGMLogger.warning('Failed to parse cached local experiment configs: $e');
+      return null;
+    }
+  }
+
+  /// Whether a background refetch of local experiment configs is due
+  /// (more than ~1h since the last fetch).
+  Future<bool> _shouldRefetchLocalConfigs() async {
+    final fetchedAtStr =
+        await _stateStorage!.getString(_localExperimentConfigsFetchedAtKey);
+    final fetchedAt = fetchedAtStr != null ? int.tryParse(fetchedAtStr) : null;
+    if (fetchedAt == null) return true;
+
+    final now = DateTime.now().millisecondsSinceEpoch;
+    return (now - fetchedAt) > _experimentsRefetchIntervalMs;
+  }
+
+  /// Fetch experiment configs for local enrollment and swap them in
+  /// atomically on success. On failure the currently served configs are
+  /// kept untouched.
+  Future<void> _fetchLocalExperimentConfigs() async {
+    try {
+      final result = await _networkClient!.fetchExperimentConfigs(_config!);
+
+      if (result.success && result.experiments != null) {
+        _setLocalExperimentConfigs(result.experiments!);
+        final now = DateTime.now().millisecondsSinceEpoch;
+        await _stateStorage!.setString(
+          _localExperimentConfigsKey,
+          jsonEncode(result.experiments!.map((e) => e.toJson()).toList()),
+        );
+        await _stateStorage!.setString(
+          _localExperimentConfigsFetchedAtKey,
+          now.toString(),
+        );
+        MGMLogger.debug(
+          'Fetched and cached ${result.experiments!.length} local '
+          'experiment configs',
+        );
+      } else {
+        MGMLogger.warning(
+          'Failed to fetch local experiment configs, keeping current configs',
+        );
+      }
+    } catch (e) {
+      MGMLogger.error('Error fetching local experiment configs', e);
+    } finally {
+      _experimentsLoaded = true;
+      _completeExperimentsReady();
+    }
+  }
+
+  /// Resolve a variant in local mode: reuse the sticky persisted assignment
+  /// for the experiment UUID when present, otherwise bucket on device and
+  /// persist the result.
+  String? _getLocalVariant(String experimentName, String? fallback) {
+    final experiment = _localExperimentsByName[experimentName];
+    if (experiment == null) {
+      MGMLogger.debug('getVariant($experimentName) = fallback ($fallback)');
+      return fallback;
+    }
+
+    var variant = _localAssignments[experiment.id];
+    if (variant == null) {
+      final userId = _effectiveUserId;
+      if (userId == null) {
+        MGMLogger.debug('getVariant($experimentName) = fallback ($fallback)');
+        return fallback;
+      }
+
+      variant = MGMBucketing.variantFor(
+        experiment.id,
+        userId,
+        experiment.variants,
+      );
+      if (variant == null) {
+        MGMLogger.debug('getVariant($experimentName) = fallback ($fallback)');
+        return fallback;
+      }
+
+      // Sticky: persist the assignment so the user keeps this variant even
+      // after identify() changes the effective user ID.
+      _localAssignments[experiment.id] = variant;
+      // Persist asynchronously - don't await to keep getVariant sync
+      unawaited(_saveLocalAssignments());
+      MGMLogger.debug(
+        'Bucketed locally: experiment "$experimentName" -> "$variant"',
+      );
+    }
+
+    _recordExposure(experimentName, variant);
+    MGMLogger.debug('getVariant($experimentName) = $variant');
+    return variant;
+  }
+
+  /// Get the assigned variant for an experiment.
   ///
-  /// Variants are always assigned by the server — the SDK never buckets
-  /// locally. This method is synchronous and non-blocking: it reads from the
+  /// In [MGMExperimentMode.server] (default) variants are assigned by the
+  /// server. In [MGMExperimentMode.local] variants are bucketed on device
+  /// by deterministically hashing the experiment ID and effective user ID;
+  /// the first assignment per experiment is persisted and reused (sticky).
+  ///
+  /// This method is synchronous and non-blocking: it reads from the
   /// in-memory cache (hydrated from persistent storage at configure) and
   /// returns [fallback] (default null) when the experiment is unknown,
   /// assignments haven't loaded yet, or the SDK is not configured.
@@ -650,6 +862,11 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
       }
 
       final mgm = instance;
+
+      if (mgm._isLocalExperimentMode) {
+        return mgm._getLocalVariant(experimentName, fallback);
+      }
+
       final variant = mgm._assignedVariants[experimentName];
 
       if (variant == null) {
@@ -908,5 +1125,12 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
   static Map<String, String> get assignedVariants {
     _ensureConfigured();
     return Map<String, String>.from(instance._assignedVariants);
+  }
+
+  /// Get the sticky local assignments, keyed by experiment UUID
+  /// (for testing).
+  static Map<String, String> get localExperimentAssignments {
+    _ensureConfigured();
+    return Map<String, String>.from(instance._localAssignments);
   }
 }

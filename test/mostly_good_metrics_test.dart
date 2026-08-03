@@ -1052,6 +1052,176 @@ void main() {
     });
   });
 
+  group('A/B Testing - local experiment mode', () {
+    // Golden vector experiment: with this UUID,
+    // "$anon_abc123def456" buckets to "treatment" and
+    // "user_123" buckets to "control".
+    const buttonColor = MGMExperimentConfig(
+      id: '7b1e8a90-4c2d-4f6a-9e3b-2a1d5c8f0e71',
+      name: 'button-color',
+      variants: ['control', 'treatment'],
+    );
+
+    Future<void> configureLocalSDK({
+      List<MGMExperimentConfig>? localExperiments,
+    }) async {
+      await MostlyGoodMetrics.configure(
+        MGMConfiguration(
+          apiKey: 'test-api-key',
+          trackAppLifecycleEvents: false,
+          experimentMode: MGMExperimentMode.local,
+          localExperiments: localExperiments,
+        ),
+        eventStorage: eventStorage,
+        stateStorage: stateStorage,
+        networkClient: networkClient,
+      );
+    }
+
+    Future<void> seedAnonymousId(String anonymousId) async {
+      await stateStorage.setString('anonymousId', anonymousId);
+    }
+
+    test('buckets deterministically with inline configs and zero network',
+        () async {
+      await seedAnonymousId(r'$anon_abc123def456');
+
+      await configureLocalSDK(localExperiments: [buttonColor]);
+      expect(await MostlyGoodMetrics.ready(), true);
+
+      expect(MostlyGoodMetrics.getVariant('button-color'), 'treatment');
+
+      // No requests at all: neither configs nor server assignments
+      expect(networkClient.experimentConfigsFetchCount, 0);
+      expect(networkClient.experimentsFetchedForUsers, isEmpty);
+    });
+
+    test('buckets with the identified user ID when set before first read',
+        () async {
+      await configureLocalSDK(localExperiments: [buttonColor]);
+      expect(await MostlyGoodMetrics.ready(), true);
+      await MostlyGoodMetrics.identify('user_123');
+
+      expect(MostlyGoodMetrics.getVariant('button-color'), 'control');
+    });
+
+    test('fetches configs from the server when none are provided inline',
+        () async {
+      await seedAnonymousId(r'$anon_abc123def456');
+      networkClient.experimentConfigsToReturn = [buttonColor];
+
+      await configureLocalSDK();
+      expect(await MostlyGoodMetrics.ready(), true);
+
+      expect(MostlyGoodMetrics.getVariant('button-color'), 'treatment');
+      expect(networkClient.experimentConfigsFetchCount, 1);
+
+      // The user ID never leaves the device for enrollment
+      expect(networkClient.experimentsFetchedForUsers, isEmpty);
+    });
+
+    test('assignments are sticky - identify() never re-buckets', () async {
+      await seedAnonymousId(r'$anon_abc123def456');
+
+      await configureLocalSDK(localExperiments: [buttonColor]);
+      expect(await MostlyGoodMetrics.ready(), true);
+      expect(MostlyGoodMetrics.getVariant('button-color'), 'treatment');
+
+      // user_123 would bucket to "control" if re-bucketed
+      await MostlyGoodMetrics.identify('user_123');
+
+      expect(
+        MostlyGoodMetrics.getVariant('button-color'),
+        'treatment',
+        reason: 'The persisted assignment must be reused after identify()',
+      );
+
+      // identify() must not trigger a server assignment fetch in local mode
+      expect(networkClient.experimentsFetchedForUsers, isEmpty);
+    });
+
+    test('sticky assignments persist across restarts', () async {
+      await seedAnonymousId(r'$anon_abc123def456');
+
+      await configureLocalSDK(localExperiments: [buttonColor]);
+      expect(await MostlyGoodMetrics.ready(), true);
+      expect(MostlyGoodMetrics.getVariant('button-color'), 'treatment');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(
+        MostlyGoodMetrics.localExperimentAssignments,
+        {'7b1e8a90-4c2d-4f6a-9e3b-2a1d5c8f0e71': 'treatment'},
+      );
+
+      // Simulated restart with the same persisted state storage,
+      // identified as a user that would bucket to "control"
+      MostlyGoodMetrics.reset();
+      eventStorage = InMemoryEventStorage();
+      await configureLocalSDK(localExperiments: [buttonColor]);
+      expect(await MostlyGoodMetrics.ready(), true);
+      await MostlyGoodMetrics.identify('user_123');
+
+      expect(MostlyGoodMetrics.getVariant('button-color'), 'treatment');
+    });
+
+    test('tracks exposure once with the raw experiment name', () async {
+      await seedAnonymousId(r'$anon_abc123def456');
+
+      await configureLocalSDK(localExperiments: [buttonColor]);
+      expect(await MostlyGoodMetrics.ready(), true);
+
+      MostlyGoodMetrics.getVariant('button-color');
+      MostlyGoodMetrics.getVariant('button-color');
+      await Future<void>.delayed(Duration.zero);
+
+      final events = await eventStorage.fetchEvents(100);
+      final exposures =
+          events.where((e) => e.name == r'$experiment_exposure').toList();
+      expect(exposures.length, 1);
+      expect(exposures[0].properties?[r'$experiment_name'], 'button-color');
+      expect(exposures[0].properties?[r'$variant'], 'treatment');
+
+      final superProps = MostlyGoodMetrics.getSuperProperties();
+      expect(superProps[r'$experiment_button_color'], 'treatment');
+    });
+
+    test('returns fallback for unknown experiment', () async {
+      await configureLocalSDK(localExperiments: [buttonColor]);
+      expect(await MostlyGoodMetrics.ready(), true);
+
+      expect(
+        MostlyGoodMetrics.getVariant('unknown', fallback: 'control'),
+        'control',
+      );
+    });
+
+    test('serves cached configs when a later fetch fails', () async {
+      await seedAnonymousId(r'$anon_abc123def456');
+      networkClient.experimentConfigsToReturn = [buttonColor];
+
+      await configureLocalSDK();
+      expect(await MostlyGoodMetrics.ready(), true);
+
+      // Age the configs cache past the ~1h refetch throttle, then restart
+      // with a failing fetch - only the cache can serve
+      final twoHoursAgo = DateTime.now()
+          .subtract(const Duration(hours: 2))
+          .millisecondsSinceEpoch;
+      await stateStorage.setString(
+        'localExperimentConfigsFetchedAt',
+        twoHoursAgo.toString(),
+      );
+
+      MostlyGoodMetrics.reset();
+      networkClient.experimentConfigsSuccess = false;
+
+      await configureLocalSDK();
+      expect(await MostlyGoodMetrics.ready(), true);
+
+      expect(MostlyGoodMetrics.getVariant('button-color'), 'treatment');
+    });
+  });
+
   group('A/B Testing - super properties in events', () {
     test('includes experiment super property in tracked events', () async {
       networkClient.experimentsToReturn = {

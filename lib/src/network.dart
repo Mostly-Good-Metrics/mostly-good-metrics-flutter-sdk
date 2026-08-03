@@ -26,6 +26,21 @@ class ExperimentsResult {
   });
 }
 
+/// Result of fetching experiment configs (for local enrollment) from the API.
+class ExperimentConfigsResult {
+  /// The experiment definitions.
+  final List<MGMExperimentConfig>? experiments;
+
+  /// Whether the fetch was successful.
+  final bool success;
+
+  /// Creates a new experiment configs result.
+  const ExperimentConfigsResult({
+    this.experiments,
+    required this.success,
+  });
+}
+
 /// Abstract interface for the network client.
 abstract class NetworkClient {
   /// Send events to the API.
@@ -43,6 +58,13 @@ abstract class NetworkClient {
     MGMConfiguration config, {
     String? anonymousId,
   });
+
+  /// Fetch experiment definitions for local (on-device) enrollment.
+  ///
+  /// No user identifier is sent — bucketing happens on device.
+  Future<ExperimentConfigsResult> fetchExperimentConfigs(
+    MGMConfiguration config,
+  );
 
   /// Check if we're currently rate limited.
   bool isRateLimited();
@@ -230,6 +252,69 @@ class HttpNetworkClient implements NetworkClient {
     }
   }
 
+  @override
+  Future<ExperimentConfigsResult> fetchExperimentConfigs(
+    MGMConfiguration config,
+  ) async {
+    final url = Uri.parse('${config.baseUrl}/v1/experiments/configs');
+
+    MGMLogger.debug('Fetching experiment configs from $url');
+
+    try {
+      final osVersion = MGMUtils.getOSVersion();
+      final response = await _client.get(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ${config.apiKey}',
+          'User-Agent': 'MostlyGoodMetrics-Flutter/$sdkVersion',
+          'X-MGM-SDK': 'flutter',
+          'X-MGM-SDK-Version': sdkVersion,
+          'X-MGM-Platform': MGMUtils.getPlatformName(),
+          if (osVersion != null) 'X-MGM-Platform-Version': osVersion,
+        },
+      );
+
+      MGMLogger.debug(
+        'Experiment configs response status: ${response.statusCode}',
+      );
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        try {
+          final data = json.decode(response.body) as Map<String, dynamic>;
+          final experiments = (data['experiments'] as List<dynamic>? ?? [])
+              .map(
+                (e) => MGMExperimentConfig.fromJson(e as Map<String, dynamic>),
+              )
+              .toList();
+          MGMLogger.debug('Fetched ${experiments.length} experiment configs');
+          return ExperimentConfigsResult(
+            experiments: experiments,
+            success: true,
+          );
+        } catch (e) {
+          MGMLogger.error('Failed to parse experiment configs response', e);
+          return const ExperimentConfigsResult(success: false);
+        }
+      }
+
+      MGMLogger.warning(
+        'Failed to fetch experiment configs: '
+        '${response.statusCode} - ${response.body}',
+      );
+      return const ExperimentConfigsResult(success: false);
+    } on SocketException catch (e) {
+      MGMLogger.error('Network error fetching experiment configs', e);
+      return const ExperimentConfigsResult(success: false);
+    } on http.ClientException catch (e) {
+      MGMLogger.error('HTTP client error fetching experiment configs', e);
+      return const ExperimentConfigsResult(success: false);
+    } catch (e) {
+      MGMLogger.error('Unknown error fetching experiment configs', e);
+      return const ExperimentConfigsResult(success: false);
+    }
+  }
+
   /// Clear rate limiting state (for testing).
   void clearRateLimiting() {
     _retryAfterTime = null;
@@ -259,6 +344,15 @@ class MockNetworkClient implements NetworkClient {
   /// returning (use to simulate slow or hanging fetches in tests).
   Completer<void>? experimentsFetchGate;
 
+  /// Mock experiment configs to return from fetchExperimentConfigs.
+  List<MGMExperimentConfig>? experimentConfigsToReturn;
+
+  /// Whether fetchExperimentConfigs should succeed.
+  bool experimentConfigsSuccess = true;
+
+  /// Number of fetchExperimentConfigs calls (for testing).
+  int experimentConfigsFetchCount = 0;
+
   @override
   Future<SendResult> sendEvents(
     EventsPayload payload,
@@ -282,6 +376,17 @@ class MockNetworkClient implements NetworkClient {
     return ExperimentsResult(
       assignedVariants: experimentsToReturn,
       success: experimentsSuccess,
+    );
+  }
+
+  @override
+  Future<ExperimentConfigsResult> fetchExperimentConfigs(
+    MGMConfiguration config,
+  ) async {
+    experimentConfigsFetchCount++;
+    return ExperimentConfigsResult(
+      experiments: experimentConfigsToReturn,
+      success: experimentConfigsSuccess,
     );
   }
 
