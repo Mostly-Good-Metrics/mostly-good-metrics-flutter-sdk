@@ -24,12 +24,16 @@ void main() {
   Future<void> configureSDK({
     bool trackLifecycleEvents = false,
     String? appVersion,
+    bool optedOutByDefault = false,
+    bool collectDeviceProperties = true,
   }) async {
     await MostlyGoodMetrics.configure(
       MGMConfiguration(
         apiKey: 'test-api-key',
         trackAppLifecycleEvents: trackLifecycleEvents,
         appVersion: appVersion,
+        optedOutByDefault: optedOutByDefault,
+        collectDeviceProperties: collectDeviceProperties,
       ),
       eventStorage: eventStorage,
       stateStorage: stateStorage,
@@ -1219,6 +1223,395 @@ void main() {
       expect(await MostlyGoodMetrics.ready(), true);
 
       expect(MostlyGoodMetrics.getVariant('button-color'), 'treatment');
+    });
+
+    test('forget-me clears sticky assignments and re-buckets fresh', () async {
+      // Golden vector: the seeded anonymous ID buckets to "treatment"
+      await seedAnonymousId(r'$anon_abc123def456');
+
+      await configureLocalSDK(localExperiments: [buttonColor]);
+      expect(await MostlyGoodMetrics.ready(), true);
+      expect(MostlyGoodMetrics.getVariant('button-color'), 'treatment');
+      await Future<void>.delayed(Duration.zero);
+      expect(
+        MostlyGoodMetrics.localExperimentAssignments,
+        {'7b1e8a90-4c2d-4f6a-9e3b-2a1d5c8f0e71': 'treatment'},
+      );
+
+      await MostlyGoodMetrics.resetIdentity(clearAnonymousId: true);
+
+      // Assignments are cleared in memory and in storage
+      expect(MostlyGoodMetrics.localExperimentAssignments, isEmpty);
+      expect(
+        await stateStorage.getString('localExperimentAssignments'),
+        null,
+      );
+
+      // Re-bucketing is fresh: the golden-vector user that maps to the
+      // other variant now gets "control", not the old sticky "treatment"
+      await MostlyGoodMetrics.identify('user_123');
+      expect(
+        MostlyGoodMetrics.getVariant('button-color'),
+        'control',
+        reason: 'A forgotten identity must be re-bucketed, not reuse the '
+            'previous assignment',
+      );
+    });
+
+    test('plain resetIdentity keeps sticky assignments', () async {
+      await seedAnonymousId(r'$anon_abc123def456');
+
+      await configureLocalSDK(localExperiments: [buttonColor]);
+      expect(await MostlyGoodMetrics.ready(), true);
+      expect(MostlyGoodMetrics.getVariant('button-color'), 'treatment');
+      await Future<void>.delayed(Duration.zero);
+
+      await MostlyGoodMetrics.resetIdentity();
+
+      // user_123 would bucket to "control" if re-bucketed
+      await MostlyGoodMetrics.identify('user_123');
+      expect(
+        MostlyGoodMetrics.getVariant('button-color'),
+        'treatment',
+        reason: 'A plain resetIdentity() must keep sticky assignments',
+      );
+      expect(
+        MostlyGoodMetrics.localExperimentAssignments,
+        {'7b1e8a90-4c2d-4f6a-9e3b-2a1d5c8f0e71': 'treatment'},
+      );
+    });
+
+    test('opted out: no config fetch, cached bucketing, no exposures',
+        () async {
+      await seedAnonymousId(r'$anon_abc123def456');
+      networkClient.experimentConfigsToReturn = [buttonColor];
+
+      // First run (opted in): fetch and cache the configs, no variant reads
+      await configureLocalSDK();
+      expect(await MostlyGoodMetrics.ready(), true);
+      expect(networkClient.experimentConfigsFetchCount, 1);
+
+      await MostlyGoodMetrics.optOut();
+
+      // Age the configs cache past the ~1h throttle so a fetch would be due
+      final twoHoursAgo = DateTime.now()
+          .subtract(const Duration(hours: 2))
+          .millisecondsSinceEpoch;
+      await stateStorage.setString(
+        'localExperimentConfigsFetchedAt',
+        twoHoursAgo.toString(),
+      );
+
+      // Simulated restart while opted out
+      MostlyGoodMetrics.reset();
+      eventStorage = InMemoryEventStorage();
+      await configureLocalSDK();
+      expect(await MostlyGoodMetrics.ready(), true);
+
+      // Zero network while opted out: the due refetch was skipped
+      expect(networkClient.experimentConfigsFetchCount, 1);
+
+      // Bucketing from the cached configs still works
+      expect(MostlyGoodMetrics.getVariant('button-color'), 'treatment');
+      await Future<void>.delayed(Duration.zero);
+
+      // ...but nothing is recorded: no exposure event, no super property,
+      // and no dedup state
+      final events = await eventStorage.fetchEvents(100);
+      expect(
+        events.where((e) => e.name == r'$experiment_exposure'),
+        isEmpty,
+      );
+      expect(MostlyGoodMetrics.getSuperProperties(), isEmpty);
+      expect(await stateStorage.getString('experimentExposures'), null);
+
+      // Because no dedup state was recorded, the exposure fires on the
+      // first read after optIn()
+      await MostlyGoodMetrics.optIn();
+      expect(MostlyGoodMetrics.getVariant('button-color'), 'treatment');
+      await Future<void>.delayed(Duration.zero);
+
+      final exposures = (await eventStorage.fetchEvents(100))
+          .where((e) => e.name == r'$experiment_exposure')
+          .toList();
+      expect(exposures.length, 1);
+      expect(exposures[0].properties?[r'$experiment_name'], 'button-color');
+      expect(exposures[0].properties?[r'$variant'], 'treatment');
+    });
+  });
+
+  group('Privacy - opt-out', () {
+    test('defaults to opted in', () async {
+      await configureSDK();
+
+      expect(MostlyGoodMetrics.isOptedOut, false);
+    });
+
+    test('optOut stops tracking immediately', () async {
+      await configureSDK();
+
+      await MostlyGoodMetrics.optOut();
+      MostlyGoodMetrics.track('should_be_dropped');
+
+      expect(MostlyGoodMetrics.isOptedOut, true);
+      expect(await eventStorage.eventCount(), 0);
+    });
+
+    test('optOut purges pending events', () async {
+      await configureSDK();
+      MostlyGoodMetrics.track('event1');
+      MostlyGoodMetrics.track('event2');
+      expect(await eventStorage.eventCount(), 2);
+
+      await MostlyGoodMetrics.optOut();
+
+      expect(await eventStorage.eventCount(), 0);
+    });
+
+    test('optOut makes identify a no-op', () async {
+      await configureSDK();
+
+      await MostlyGoodMetrics.optOut();
+      await MostlyGoodMetrics.identify(
+        'user-opted-out',
+        profile: const UserProfile(email: 'private@example.com'),
+      );
+
+      expect(MostlyGoodMetrics.userId, null);
+      expect(await stateStorage.getString('userId'), null);
+      expect(await eventStorage.eventCount(), 0);
+    });
+
+    test('optOut makes flush a no-op', () async {
+      await configureSDK();
+      await MostlyGoodMetrics.optOut();
+
+      // Simulate an event that slipped into storage after the purge
+      await eventStorage.store(
+        MGMEvent(
+          name: 'leftover_event',
+          clientEventId: 'test-id',
+          timestamp: DateTime.now(),
+          platform: 'test',
+          environment: 'test',
+        ),
+      );
+
+      await MostlyGoodMetrics.flush();
+
+      expect(networkClient.sentPayloads.length, 0);
+      expect(await eventStorage.eventCount(), 1);
+    });
+
+    test('opt-out persists across a simulated restart', () async {
+      await configureSDK();
+      await MostlyGoodMetrics.optOut();
+
+      // Simulated restart: fresh instance, same persisted state storage
+      MostlyGoodMetrics.reset();
+      await configureSDK();
+
+      expect(MostlyGoodMetrics.isOptedOut, true);
+
+      MostlyGoodMetrics.track('still_dropped');
+      expect(await eventStorage.eventCount(), 0);
+    });
+
+    test('optIn resumes tracking', () async {
+      await configureSDK();
+      await MostlyGoodMetrics.optOut();
+
+      await MostlyGoodMetrics.optIn();
+      MostlyGoodMetrics.track('tracked_again');
+
+      expect(MostlyGoodMetrics.isOptedOut, false);
+      expect(await eventStorage.eventCount(), 1);
+    });
+
+    test('optedOutByDefault starts opted out', () async {
+      await configureSDK(
+        trackLifecycleEvents: true,
+        optedOutByDefault: true,
+      );
+
+      expect(MostlyGoodMetrics.isOptedOut, true);
+
+      // Not even lifecycle events are tracked
+      expect(await eventStorage.eventCount(), 0);
+    });
+
+    test('persisted opt-in overrides optedOutByDefault', () async {
+      await configureSDK(optedOutByDefault: true);
+      await MostlyGoodMetrics.optIn();
+
+      // Simulated restart with the same consent-first default
+      MostlyGoodMetrics.reset();
+      await configureSDK(optedOutByDefault: true);
+
+      expect(MostlyGoodMetrics.isOptedOut, false);
+
+      MostlyGoodMetrics.track('consented_event');
+      expect(await eventStorage.eventCount(), 1);
+    });
+
+    test('isOptedOut throws when not configured', () {
+      expect(
+        () => MostlyGoodMetrics.isOptedOut,
+        throwsA(isA<MGMError>()),
+      );
+    });
+  });
+
+  group('Privacy - resetAnonymousId', () {
+    test('rotates the anonymous ID', () async {
+      await configureSDK();
+      final originalId = MostlyGoodMetrics.anonymousId;
+
+      await MostlyGoodMetrics.resetAnonymousId();
+
+      expect(MostlyGoodMetrics.anonymousId, isNot(originalId));
+      expect(MostlyGoodMetrics.anonymousId, startsWith(r'$anon_'));
+    });
+
+    test('persists the rotated anonymous ID', () async {
+      await configureSDK();
+      final originalId = MostlyGoodMetrics.anonymousId;
+
+      await MostlyGoodMetrics.resetAnonymousId();
+      final rotatedId = MostlyGoodMetrics.anonymousId;
+
+      expect(await stateStorage.getString('anonymousId'), rotatedId);
+
+      // Simulated restart: the rotated ID survives
+      MostlyGoodMetrics.reset();
+      await configureSDK();
+
+      expect(MostlyGoodMetrics.anonymousId, rotatedId);
+      expect(MostlyGoodMetrics.anonymousId, isNot(originalId));
+    });
+
+    test('subsequent events use the rotated anonymous ID', () async {
+      await configureSDK();
+
+      MostlyGoodMetrics.track('before_rotation');
+      await MostlyGoodMetrics.resetAnonymousId();
+      MostlyGoodMetrics.track('after_rotation');
+
+      final events = await eventStorage.fetchEvents(2);
+      expect(events[0].userId, isNot(events[1].userId));
+      expect(events[1].userId, MostlyGoodMetrics.anonymousId);
+    });
+  });
+
+  group('Privacy - resetIdentity(clearAnonymousId: true)', () {
+    test('default resetIdentity keeps the anonymous ID', () async {
+      await configureSDK();
+      final originalId = MostlyGoodMetrics.anonymousId;
+
+      await MostlyGoodMetrics.resetIdentity();
+
+      expect(MostlyGoodMetrics.anonymousId, originalId);
+    });
+
+    test('rotates the anonymous ID', () async {
+      await configureSDK();
+      final originalId = MostlyGoodMetrics.anonymousId;
+
+      await MostlyGoodMetrics.resetIdentity(clearAnonymousId: true);
+
+      expect(MostlyGoodMetrics.anonymousId, isNot(originalId));
+      expect(MostlyGoodMetrics.anonymousId, startsWith(r'$anon_'));
+      expect(
+        await stateStorage.getString('anonymousId'),
+        MostlyGoodMetrics.anonymousId,
+      );
+    });
+
+    test('purges pending events', () async {
+      await configureSDK();
+      await MostlyGoodMetrics.identify('user-forget-me');
+      MostlyGoodMetrics.track('event1');
+      MostlyGoodMetrics.track('event2');
+
+      await MostlyGoodMetrics.resetIdentity(clearAnonymousId: true);
+
+      expect(await eventStorage.eventCount(), 0);
+      expect(MostlyGoodMetrics.userId, null);
+    });
+
+    test('clears super properties', () async {
+      await configureSDK();
+      await MostlyGoodMetrics.setSuperProperty('plan', 'premium');
+
+      await MostlyGoodMetrics.resetIdentity(clearAnonymousId: true);
+
+      expect(MostlyGoodMetrics.getSuperProperties(), isEmpty);
+      expect(await stateStorage.getString('superProperties'), null);
+    });
+
+    test('starts a new session', () async {
+      await configureSDK();
+      final originalSessionId = MostlyGoodMetrics.sessionId;
+
+      await MostlyGoodMetrics.resetIdentity(clearAnonymousId: true);
+
+      expect(MostlyGoodMetrics.sessionId, isNot(originalSessionId));
+    });
+  });
+
+  group('Privacy - collectDeviceProperties', () {
+    test('includes device properties by default', () async {
+      await configureSDK();
+
+      MostlyGoodMetrics.track('test_event');
+
+      final events = await eventStorage.fetchEvents(1);
+      expect(events[0].locale, isNotNull);
+      expect(events[0].timezone, isNotNull);
+    });
+
+    test('omits device properties from events when disabled', () async {
+      await configureSDK(
+        collectDeviceProperties: false,
+        appVersion: '1.0.0',
+      );
+
+      MostlyGoodMetrics.track('test_event');
+
+      final events = await eventStorage.fetchEvents(1);
+      expect(events[0].deviceManufacturer, null);
+      expect(events[0].locale, null);
+      expect(events[0].timezone, null);
+
+      // Functional fields are still sent
+      expect(events[0].platform, isNotEmpty);
+      expect(events[0].osVersion, isNotNull);
+      expect(events[0].appVersion, '1.0.0');
+
+      final json = events[0].toJson();
+      expect(json.containsKey('device_manufacturer'), false);
+      expect(json.containsKey('locale'), false);
+      expect(json.containsKey('timezone'), false);
+      expect(json.containsKey('platform'), true);
+    });
+
+    test('omits device properties from batch context when disabled', () async {
+      await configureSDK(collectDeviceProperties: false);
+
+      MostlyGoodMetrics.track('test_event');
+      await MostlyGoodMetrics.flush();
+
+      expect(networkClient.sentPayloads.length, 1);
+      final context = networkClient.sentPayloads[0].context;
+      expect(context.deviceManufacturer, null);
+      expect(context.locale, null);
+      expect(context.timezone, null);
+
+      final json = context.toJson();
+      expect(json.containsKey('device_manufacturer'), false);
+      expect(json.containsKey('locale'), false);
+      expect(json.containsKey('timezone'), false);
+      expect(json.containsKey('platform'), true);
     });
   });
 

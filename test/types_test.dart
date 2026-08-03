@@ -16,6 +16,8 @@ void main() {
       expect(config.trackAppLifecycleEvents, true);
       expect(config.experimentMode, MGMExperimentMode.server);
       expect(config.localExperiments, null);
+      expect(config.optedOutByDefault, false);
+      expect(config.collectDeviceProperties, true);
     });
 
     test('creates with all parameters', () {
@@ -29,6 +31,8 @@ void main() {
         maxStoredEvents: 5000,
         enableDebugLogging: true,
         trackAppLifecycleEvents: false,
+        optedOutByDefault: true,
+        collectDeviceProperties: false,
       );
 
       expect(config.apiKey, 'test-api-key');
@@ -40,6 +44,8 @@ void main() {
       expect(config.maxStoredEvents, 5000);
       expect(config.enableDebugLogging, true);
       expect(config.trackAppLifecycleEvents, false);
+      expect(config.optedOutByDefault, true);
+      expect(config.collectDeviceProperties, false);
     });
 
     test('copyWith creates new instance with updated values', () {
@@ -47,14 +53,20 @@ void main() {
       final copied = original.copyWith(
         environment: 'development',
         appVersion: '1.0.0',
+        optedOutByDefault: true,
+        collectDeviceProperties: false,
       );
 
       expect(copied.apiKey, 'test-key');
       expect(copied.environment, 'development');
       expect(copied.appVersion, '1.0.0');
+      expect(copied.optedOutByDefault, true);
+      expect(copied.collectDeviceProperties, false);
       // Original should be unchanged
       expect(original.environment, 'production');
       expect(original.appVersion, null);
+      expect(original.optedOutByDefault, false);
+      expect(original.collectDeviceProperties, true);
     });
 
     test('copyWith updates experiment mode and local experiments', () {
