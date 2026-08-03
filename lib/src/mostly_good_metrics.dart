@@ -41,11 +41,13 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
   String? _anonymousId;
   String? _sessionId;
   bool _isAppInForeground = true;
+  bool _isOptedOut = false;
 
   // Storage keys
   static const String _userIdKey = 'userId';
   static const String _anonymousIdKey = 'anonymousId';
   static const String _sessionIdKey = 'sessionId';
+  static const String _optedOutKey = 'optedOut';
   static const String _appVersionKey = 'appVersion';
   static const String _superPropertiesKey = 'superProperties';
   static const String _identifyHashKey = 'identifyHash';
@@ -157,6 +159,14 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
     _userId = await _stateStorage!.getString(_userIdKey);
     MGMLogger.debug('Restored userId: $_userId');
 
+    // Restore opt-out state. A persisted choice always wins over the
+    // configured default.
+    final optedOutStr = await _stateStorage!.getString(_optedOutKey);
+    _isOptedOut = optedOutStr != null
+        ? optedOutStr == 'true'
+        : _config!.optedOutByDefault;
+    MGMLogger.debug('Restored optedOut: $_isOptedOut');
+
     // Restore or generate anonymous ID
     _anonymousId = await _stateStorage!.getString(_anonymousIdKey);
     if (_anonymousId == null) {
@@ -243,11 +253,18 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
   /// Super properties are automatically merged with event properties.
   /// Event properties override super properties if there's a key conflict.
   ///
+  /// Does nothing while the user is opted out (see [optOut]).
+  ///
   /// Throws [MGMError] if the SDK is not configured or if validation fails.
   static void track(String name, {Map<String, dynamic>? properties}) {
     _ensureConfigured();
 
     final mgm = instance;
+
+    if (mgm._isOptedOut) {
+      MGMLogger.debug('Opted out, dropping event: $name');
+      return;
+    }
 
     // Validate event name
     final nameError = MGMUtils.validateEventName(name);
@@ -286,9 +303,13 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
       appVersion: mgm._config!.appVersion,
       osVersion: MGMUtils.getOSVersion(),
       environment: mgm._config!.environment,
-      deviceManufacturer: MGMUtils.getDeviceManufacturer(),
-      locale: MGMUtils.getLocale(),
-      timezone: MGMUtils.getTimezone(),
+      deviceManufacturer: mgm._config!.collectDeviceProperties
+          ? MGMUtils.getDeviceManufacturer()
+          : null,
+      locale:
+          mgm._config!.collectDeviceProperties ? MGMUtils.getLocale() : null,
+      timezone:
+          mgm._config!.collectDeviceProperties ? MGMUtils.getTimezone() : null,
       properties: mergedProperties.isEmpty ? null : mergedProperties,
     );
 
@@ -309,10 +330,18 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
   /// user (linking the stored anonymous ID). The currently served variants
   /// stay in place until the response arrives, then are swapped atomically —
   /// they are never cleared mid-session.
+  ///
+  /// Does nothing while the user is opted out (see [optOut]).
   static Future<void> identify(String userId, {UserProfile? profile}) async {
     _ensureConfigured();
 
     final mgm = instance;
+
+    if (mgm._isOptedOut) {
+      MGMLogger.debug('Opted out, ignoring identify: $userId');
+      return;
+    }
+
     final previousUserId = mgm._userId;
     mgm._userId = userId;
     await mgm._stateStorage!.setString(_userIdKey, userId);
@@ -393,7 +422,12 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
   /// Reset the current user identity.
   ///
   /// This clears the userId, identify debounce state, and starts a new session.
-  static Future<void> resetIdentity() async {
+  ///
+  /// When [clearAnonymousId] is true, this is a full "forget me": the
+  /// persisted anonymous ID is rotated, all pending (unsent) events are
+  /// purged, and all super properties are cleared — nothing tracked after
+  /// the reset can be linked to the previous user.
+  static Future<void> resetIdentity({bool clearAnonymousId = false}) async {
     _ensureConfigured();
 
     final mgm = instance;
@@ -401,11 +435,77 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
     await mgm._stateStorage!.setString(_userIdKey, null);
     await mgm._clearIdentifyState();
 
+    if (clearAnonymousId) {
+      // Rotate the anonymous ID
+      mgm._anonymousId = MGMUtils.generateAnonymousId();
+      await mgm._stateStorage!.setString(_anonymousIdKey, mgm._anonymousId);
+
+      // Purge pending events queued under the previous identity
+      await mgm._eventStorage!.clear();
+
+      // Clear super properties
+      mgm._superProperties.clear();
+      await mgm._stateStorage!.setString(_superPropertiesKey, null);
+    }
+
     // Start new session
     mgm._sessionId = MGMUtils.generateUUID();
     await mgm._stateStorage!.setString(_sessionIdKey, mgm._sessionId);
 
-    MGMLogger.debug('Identity reset');
+    MGMLogger.debug('Identity reset (clearAnonymousId=$clearAnonymousId)');
+  }
+
+  /// Rotate the anonymous ID.
+  ///
+  /// Generates a new persisted anonymous ID. Events tracked afterwards
+  /// (while not identified) can no longer be linked to the previous
+  /// anonymous ID.
+  static Future<void> resetAnonymousId() async {
+    _ensureConfigured();
+
+    final mgm = instance;
+    mgm._anonymousId = MGMUtils.generateAnonymousId();
+    await mgm._stateStorage!.setString(_anonymousIdKey, mgm._anonymousId);
+    MGMLogger.debug('Rotated anonymousId: ${mgm._anonymousId}');
+  }
+
+  // Privacy / Opt-Out
+
+  /// Opt the user out of all tracking.
+  ///
+  /// Takes effect immediately: [track], [identify], and [flush] become
+  /// no-ops, and all pending (unsent) events are purged. The choice is
+  /// persisted and survives app restarts, until [optIn] is called.
+  static Future<void> optOut() async {
+    _ensureConfigured();
+
+    final mgm = instance;
+    mgm._isOptedOut = true;
+    await mgm._stateStorage!.setString(_optedOutKey, 'true');
+
+    // Purge any events queued before the opt-out
+    await mgm._eventStorage!.clear();
+
+    MGMLogger.debug('Opted out of tracking');
+  }
+
+  /// Opt the user back in to tracking.
+  ///
+  /// Re-enables [track], [identify], and [flush]. The choice is persisted
+  /// and survives app restarts.
+  static Future<void> optIn() async {
+    _ensureConfigured();
+
+    final mgm = instance;
+    mgm._isOptedOut = false;
+    await mgm._stateStorage!.setString(_optedOutKey, 'false');
+    MGMLogger.debug('Opted in to tracking');
+  }
+
+  /// Whether the user is currently opted out of tracking.
+  static bool get isOptedOut {
+    _ensureConfigured();
+    return instance._isOptedOut;
   }
 
   /// Start a new session.
@@ -792,6 +892,11 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
   }
 
   Future<void> _flushEvents() async {
+    if (_isOptedOut) {
+      MGMLogger.debug('Opted out, skipping flush');
+      return;
+    }
+
     final eventCount = await _eventStorage!.eventCount();
     if (eventCount == 0) {
       MGMLogger.debug('No events to flush');
@@ -819,9 +924,13 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
         userId: _effectiveUserId,
         sessionId: _sessionId,
         environment: _config!.environment,
-        deviceManufacturer: MGMUtils.getDeviceManufacturer(),
-        locale: MGMUtils.getLocale(),
-        timezone: MGMUtils.getTimezone(),
+        deviceManufacturer: _config!.collectDeviceProperties
+            ? MGMUtils.getDeviceManufacturer()
+            : null,
+        locale:
+            _config!.collectDeviceProperties ? MGMUtils.getLocale() : null,
+        timezone:
+            _config!.collectDeviceProperties ? MGMUtils.getTimezone() : null,
       ),
     );
 

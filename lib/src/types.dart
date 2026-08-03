@@ -27,6 +27,21 @@ class MGMConfiguration {
   /// Whether to automatically track app lifecycle events.
   final bool trackAppLifecycleEvents;
 
+  /// Whether the SDK starts opted out of all tracking.
+  ///
+  /// Set this to true for consent-first apps: no events are collected until
+  /// the user grants consent and you call `MostlyGoodMetrics.optIn()`.
+  /// A persisted opt-in/opt-out choice always takes precedence over this
+  /// default.
+  final bool optedOutByDefault;
+
+  /// Whether to collect device properties (device manufacturer, locale,
+  /// and timezone) with events.
+  ///
+  /// When false, these fields are omitted from all events and batch context.
+  /// Functional fields (platform, OS version, app version) are always sent.
+  final bool collectDeviceProperties;
+
   /// Creates a new configuration for MostlyGoodMetrics.
   const MGMConfiguration({
     required this.apiKey,
@@ -38,6 +53,8 @@ class MGMConfiguration {
     this.maxStoredEvents = 10000,
     this.enableDebugLogging = false,
     this.trackAppLifecycleEvents = true,
+    this.optedOutByDefault = false,
+    this.collectDeviceProperties = true,
   })  : assert(maxBatchSize >= 1 && maxBatchSize <= 1000),
         assert(flushInterval >= 1),
         assert(maxStoredEvents >= 100);
@@ -53,6 +70,8 @@ class MGMConfiguration {
     int? maxStoredEvents,
     bool? enableDebugLogging,
     bool? trackAppLifecycleEvents,
+    bool? optedOutByDefault,
+    bool? collectDeviceProperties,
   }) {
     return MGMConfiguration(
       apiKey: apiKey ?? this.apiKey,
@@ -65,6 +84,9 @@ class MGMConfiguration {
       enableDebugLogging: enableDebugLogging ?? this.enableDebugLogging,
       trackAppLifecycleEvents:
           trackAppLifecycleEvents ?? this.trackAppLifecycleEvents,
+      optedOutByDefault: optedOutByDefault ?? this.optedOutByDefault,
+      collectDeviceProperties:
+          collectDeviceProperties ?? this.collectDeviceProperties,
     );
   }
 }
