@@ -2,6 +2,8 @@
 
 A lightweight Flutter SDK for tracking analytics events with [MostlyGoodMetrics](https://mostlygoodmetrics.com).
 
+Documentation: [docs.mostlygoodmetrics.com](https://docs.mostlygoodmetrics.com)
+
 ## Table of Contents
 
 - [Requirements](#requirements)
@@ -50,7 +52,7 @@ Add the package to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  mostly_good_metrics_flutter: ^0.1.0
+  mostly_good_metrics_flutter: ^0.3.0
 ```
 
 Then install dependencies:
