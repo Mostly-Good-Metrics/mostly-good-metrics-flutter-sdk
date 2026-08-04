@@ -102,7 +102,7 @@ For more control, pass additional configuration:
 await MostlyGoodMetrics.configure(
   MGMConfiguration(
     apiKey: 'mgm_proj_your_api_key',
-    baseUrl: 'https://mostlygoodmetrics.com',
+    baseUrl: 'https://ingest.mostlygoodmetrics.com',
     environment: 'production',
     appVersion: '1.0.0', // Required for install/update tracking
     maxBatchSize: 100,
@@ -119,7 +119,7 @@ await MostlyGoodMetrics.configure(
 | Option | Default | Description |
 |--------|---------|-------------|
 | `apiKey` | Required | Your MostlyGoodMetrics API key |
-| `baseUrl` | `https://mostlygoodmetrics.com` | API endpoint |
+| `baseUrl` | `https://ingest.mostlygoodmetrics.com` | API endpoint |
 | `environment` | `"production"` | Environment name |
 | `appVersion` | - | App version string (required for install/update tracking) |
 | `maxBatchSize` | `100` | Events per batch (1-1000) |
