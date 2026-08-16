@@ -409,9 +409,7 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
         properties['name'] = profile.name;
       }
 
-      // Link the stored anonymous ID so the server can merge the pre-identify
-      // anonymous profile into the newly-identified user. Skip when it is
-      // absent or already equals the identified user ID (nothing to merge).
+      // Send stored anon id (when distinct) so the backend can merge pre-identify events.
       final anonymousId = _anonymousId;
       if (anonymousId != null &&
           anonymousId.isNotEmpty &&

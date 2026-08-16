@@ -312,8 +312,7 @@ void main() {
           events.where((e) => e.name == r'$identify').toList();
 
       expect(identifyEvents.length, 1);
-      // user_id is the newly-identified id; $anonymous_id carries the
-      // stored anonymous id used before identify().
+      // $anonymous_id carries the stored pre-identify anonymous id.
       expect(identifyEvents[0].userId, 'user-anon-link');
       expect(
         identifyEvents[0].properties![r'$anonymous_id'],
