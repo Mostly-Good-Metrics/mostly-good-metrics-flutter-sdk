@@ -294,6 +294,33 @@ void main() {
       expect(identifyEvents[0].properties!['name'], 'Jane Doe');
     });
 
+    test(r'sends $identify event with $anonymous_id set to the '
+        'pre-identify anonymous id', () async {
+      await configureSDK();
+
+      // The anonymous ID used for events before identify().
+      final anonymousIdBeforeIdentify = MostlyGoodMetrics.anonymousId;
+      expect(anonymousIdBeforeIdentify, isNotNull);
+
+      await MostlyGoodMetrics.identify(
+        'user-anon-link',
+        profile: const UserProfile(email: 'anon@example.com'),
+      );
+
+      final events = await eventStorage.fetchEvents(10);
+      final identifyEvents =
+          events.where((e) => e.name == r'$identify').toList();
+
+      expect(identifyEvents.length, 1);
+      // user_id is the newly-identified id; $anonymous_id carries the
+      // stored anonymous id used before identify().
+      expect(identifyEvents[0].userId, 'user-anon-link');
+      expect(
+        identifyEvents[0].properties![r'$anonymous_id'],
+        anonymousIdBeforeIdentify,
+      );
+    });
+
     test(r'does not send $identify event without profile', () async {
       await configureSDK();
 
