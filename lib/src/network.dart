@@ -8,8 +8,12 @@ import 'logger.dart';
 import 'types.dart';
 import 'utils.dart';
 
-/// SDK version for metrics headers
-const String sdkVersion = '0.2.6';
+/// SDK version for metrics headers.
+///
+/// Must be kept in sync with the `version` field in pubspec.yaml (the
+/// published package version). The `sdk_version_test.dart` test enforces this
+/// so the value sent in `X-MGM-SDK-Version` never drifts from the release.
+const String sdkVersion = '0.3.0';
 
 /// Result of fetching experiments from the API.
 class ExperimentsResult {
