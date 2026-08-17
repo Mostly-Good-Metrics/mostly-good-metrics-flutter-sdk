@@ -9,7 +9,7 @@ import 'types.dart';
 import 'utils.dart';
 
 /// SDK version for metrics headers
-const String sdkVersion = '0.2.6';
+const String sdkVersion = '0.5.0';
 
 /// Result of fetching experiments from the API.
 class ExperimentsResult {
