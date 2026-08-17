@@ -294,7 +294,8 @@ void main() {
       expect(identifyEvents[0].properties!['name'], 'Jane Doe');
     });
 
-    test(r'sends $identify event with $anonymous_id set to the '
+    test(
+        r'sends $identify event with $anonymous_id set to the '
         'pre-identify anonymous id', () async {
       await configureSDK();
 
