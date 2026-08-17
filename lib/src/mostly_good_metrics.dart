@@ -409,6 +409,14 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
         properties['name'] = profile.name;
       }
 
+      // Send stored anon id (when distinct) so the backend can merge pre-identify events.
+      final anonymousId = _anonymousId;
+      if (anonymousId != null &&
+          anonymousId.isNotEmpty &&
+          anonymousId != userId) {
+        properties[r'$anonymous_id'] = anonymousId;
+      }
+
       // Track the $identify event
       track(r'$identify', properties: properties);
 

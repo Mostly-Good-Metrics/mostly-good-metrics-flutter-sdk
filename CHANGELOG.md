@@ -1,3 +1,7 @@
+## Unreleased
+
+- `$identify` event now includes `$anonymous_id` (the stored anonymous ID used before `identify()`) so the backend can merge the pre-identify anonymous profile into the identified user. Omitted when the anonymous ID is absent or already equals the identified user ID.
+
 ## 0.3.0
 
 - A/B testing support: `getVariant(name, {fallback})` + `ready({timeout})` (never hangs)
