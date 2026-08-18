@@ -1,5 +1,21 @@
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mocktail/mocktail.dart';
 import 'package:mostly_good_metrics_flutter/src/utils.dart';
+
+class _MockDeviceInfoPlugin extends Mock implements DeviceInfoPlugin {}
+
+class _MockAndroidDeviceInfo extends Mock implements AndroidDeviceInfo {}
+
+class _MockAndroidBuildVersion extends Mock implements AndroidBuildVersion {}
+
+class _MockIosDeviceInfo extends Mock implements IosDeviceInfo {}
+
+class _MockMacOsDeviceInfo extends Mock implements MacOsDeviceInfo {}
+
+/// A clean, numeric OS version: "17", "17.0" or "26.5.2".
+/// No "Version" / "Build" prefixes and no Android build ids.
+final _numericOSVersion = RegExp(r'^[0-9]+(\.[0-9]+){0,2}$');
 
 void main() {
   group('MGMUtils.validateEventName', () {
@@ -198,6 +214,94 @@ void main() {
         'unknown',
       ];
       expect(validPlatforms.contains(platform), true);
+    });
+  });
+
+  group('MGMUtils.getOSVersion (MGM-203)', () {
+    tearDown(MGMUtils.resetOSVersionCache);
+
+    test('extractNumericVersion strips verbose iOS/macOS strings', () {
+      // iOS/macOS: "Version 17.0 (Build 21A329)" -> "17.0"
+      expect(
+        MGMUtils.extractNumericVersion('Version 17.0 (Build 21A329)'),
+        '17.0',
+      );
+      expect(
+        MGMUtils.extractNumericVersion('Version 26.5.2 (Build 25F74)'),
+        '26.5.2',
+      );
+      // Plain numeric strings pass through.
+      expect(MGMUtils.extractNumericVersion('14.5'), '14.5');
+      // No version present -> null.
+      expect(MGMUtils.extractNumericVersion('no digits here'), null);
+    });
+
+    test('resolveOSVersion caches a clean numeric value for getOSVersion', () async {
+      final resolved = await MGMUtils.resolveOSVersion();
+      final emitted = MGMUtils.getOSVersion();
+
+      // getOSVersion() reflects the resolved cache.
+      expect(emitted, resolved);
+      // The emitted value must be numeric with no "Version"/"Build"/build ids.
+      expect(emitted, isNotNull);
+      expect(emitted, matches(_numericOSVersion));
+      expect(emitted, isNot(contains('Version')));
+      expect(emitted, isNot(contains('Build')));
+    });
+
+    test('osVersionFromDeviceInfo returns AndroidBuildVersion.release', () async {
+      final plugin = _MockDeviceInfoPlugin();
+      final info = _MockAndroidDeviceInfo();
+      final version = _MockAndroidBuildVersion();
+      when(() => plugin.androidInfo).thenAnswer((_) async => info);
+      when(() => info.version).thenReturn(version);
+      when(() => version.release).thenReturn('14');
+
+      final result = await MGMUtils.osVersionFromDeviceInfo(
+        plugin,
+        isAndroid: true,
+        isIOS: false,
+        isMacOS: false,
+      );
+
+      expect(result, '14');
+      expect(result, matches(_numericOSVersion));
+    });
+
+    test('osVersionFromDeviceInfo returns iOS systemVersion', () async {
+      final plugin = _MockDeviceInfoPlugin();
+      final info = _MockIosDeviceInfo();
+      when(() => plugin.iosInfo).thenAnswer((_) async => info);
+      when(() => info.systemVersion).thenReturn('17.0');
+
+      final result = await MGMUtils.osVersionFromDeviceInfo(
+        plugin,
+        isAndroid: false,
+        isIOS: true,
+        isMacOS: false,
+      );
+
+      expect(result, '17.0');
+      expect(result, matches(_numericOSVersion));
+    });
+
+    test('osVersionFromDeviceInfo composes macOS version parts', () async {
+      final plugin = _MockDeviceInfoPlugin();
+      final info = _MockMacOsDeviceInfo();
+      when(() => plugin.macOsInfo).thenAnswer((_) async => info);
+      when(() => info.majorVersion).thenReturn(26);
+      when(() => info.minorVersion).thenReturn(5);
+      when(() => info.patchVersion).thenReturn(2);
+
+      final result = await MGMUtils.osVersionFromDeviceInfo(
+        plugin,
+        isAndroid: false,
+        isIOS: false,
+        isMacOS: true,
+      );
+
+      expect(result, '26.5.2');
+      expect(result, matches(_numericOSVersion));
     });
   });
 

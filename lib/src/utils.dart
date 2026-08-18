@@ -1,7 +1,8 @@
 import 'dart:io' show Platform;
 import 'dart:math';
 
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:device_info_plus/device_info_plus.dart';
+import 'package:flutter/foundation.dart' show kIsWeb, visibleForTesting;
 
 /// Utility functions for the MostlyGoodMetrics SDK.
 class MGMUtils {
@@ -123,14 +124,122 @@ class MGMUtils {
     return 'unknown';
   }
 
-  /// Gets the OS version string.
+  /// Matches a numeric version like "17", "17.0" or "26.5.2".
+  static final RegExp _numericVersionRegex = RegExp(r'\d+(\.\d+){1,2}');
+
+  /// Clean numeric OS version resolved once via [resolveOSVersion] and cached.
+  static String? _osVersion;
+
+  /// Extracts a numeric version (e.g. "17.0") from a verbose platform string
+  /// such as `"Version 17.0 (Build 21A329)"`. Returns null if none is found.
+  ///
+  /// Note: this is unreliable for Android, whose
+  /// [Platform.operatingSystemVersion] is a build id (e.g. "QKR1.191246.002")
+  /// with no real OS version — use [resolveOSVersion] there instead.
+  @visibleForTesting
+  static String? extractNumericVersion(String raw) =>
+      _numericVersionRegex.stringMatch(raw);
+
+  /// Resolves a clean, numeric OS version per platform and caches it so the
+  /// synchronous [getOSVersion] can return it during event construction.
+  ///
+  /// Uses `device_info_plus` because Dart's [Platform.operatingSystemVersion]
+  /// is verbose on iOS/macOS ("Version 17.0 (Build 21A329)") and, on Android,
+  /// is a build id with no OS version at all.
+  ///
+  /// Call once during SDK configure. [deviceInfo] is injectable for testing.
+  static Future<String?> resolveOSVersion({DeviceInfoPlugin? deviceInfo}) async {
+    if (kIsWeb) {
+      _osVersion = null;
+      return null;
+    }
+
+    try {
+      _osVersion = await _osVersionFromDeviceInfo(
+        deviceInfo ?? DeviceInfoPlugin(),
+        isAndroid: Platform.isAndroid,
+        isIOS: Platform.isIOS,
+        isMacOS: Platform.isMacOS,
+      );
+    } catch (_) {
+      // device_info_plus unavailable (e.g. unsupported desktop platform or a
+      // missing plugin in tests): fall back to the best-effort extraction,
+      // which getOSVersion() performs when the cache is empty.
+      _osVersion = null;
+    }
+
+    return getOSVersion();
+  }
+
+  /// Maps device_info_plus results to a numeric version for the given platform.
+  /// Split out from [resolveOSVersion] so it can be unit-tested with a mocked
+  /// [DeviceInfoPlugin] independent of the host platform.
+  @visibleForTesting
+  static Future<String?> osVersionFromDeviceInfo(
+    DeviceInfoPlugin deviceInfo, {
+    required bool isAndroid,
+    required bool isIOS,
+    required bool isMacOS,
+  }) =>
+      _osVersionFromDeviceInfo(
+        deviceInfo,
+        isAndroid: isAndroid,
+        isIOS: isIOS,
+        isMacOS: isMacOS,
+      );
+
+  static Future<String?> _osVersionFromDeviceInfo(
+    DeviceInfoPlugin deviceInfo, {
+    required bool isAndroid,
+    required bool isIOS,
+    required bool isMacOS,
+  }) async {
+    if (isAndroid) {
+      // e.g. "14" — the real OS version, not the build id.
+      return (await deviceInfo.androidInfo).version.release;
+    }
+    if (isIOS) {
+      // e.g. "17.0"
+      return (await deviceInfo.iosInfo).systemVersion;
+    }
+    if (isMacOS) {
+      final info = await deviceInfo.macOsInfo;
+      // e.g. "26.5.2"
+      return '${info.majorVersion}.${info.minorVersion}.${info.patchVersion}';
+    }
+    // Other platforms (Linux/Windows/etc.): the raw string is already a
+    // real version, just strip any surrounding noise.
+    return extractNumericVersion(Platform.operatingSystemVersion);
+  }
+
+  /// Gets the clean numeric OS version string (e.g. "17.0", "26.5.2", "14").
+  ///
+  /// Returns the value cached by [resolveOSVersion]. Before that has run it
+  /// falls back to extracting a numeric version from
+  /// [Platform.operatingSystemVersion] — valid on iOS/macOS/desktop but not
+  /// Android (build id), where null is returned rather than a garbage value.
   static String? getOSVersion() {
     if (kIsWeb) {
       return null; // Web doesn't have direct OS version access
     }
 
-    return Platform.operatingSystemVersion;
+    if (_osVersion != null) {
+      return _osVersion;
+    }
+
+    // Cache not yet populated by resolveOSVersion(). Android's raw string is a
+    // build id with no OS version, so we return null there instead of parsing
+    // garbage; device_info_plus supplies the correct value once resolved.
+    if (Platform.isAndroid) {
+      return null;
+    }
+
+    return extractNumericVersion(Platform.operatingSystemVersion);
   }
+
+  /// Resets the cached OS version. Test-only.
+  @visibleForTesting
+  static void resetOSVersionCache() => _osVersion = null;
 
   /// Gets the user's locale (e.g., "en_US").
   static String getLocale() {
