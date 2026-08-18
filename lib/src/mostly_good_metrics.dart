@@ -292,11 +292,14 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
       );
     }
 
-    // Merge properties: super properties < event properties
-    // Event properties override super properties
+    // Merge properties: super properties < event properties < system properties
+    // Event properties override super properties; system properties (e.g. $sdk)
+    // are always added last so every event carries them, matching the other
+    // MGM SDKs (JS, Swift, etc.) for property-based filtering/breakdowns.
     final mergedProperties = <String, dynamic>{
       ...mgm._superProperties,
       if (properties != null) ...properties,
+      r'$sdk': sdkName,
     };
 
     // Validate merged properties

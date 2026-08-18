@@ -125,6 +125,28 @@ void main() {
       expect(events[0].properties!['currency'], 'USD');
     });
 
+    test(r'stamps $sdk = flutter on every event', () async {
+      await configureSDK();
+
+      // Event with no user properties still carries $sdk.
+      MostlyGoodMetrics.track('button_clicked');
+      // Event with user properties also carries $sdk.
+      MostlyGoodMetrics.track('purchase', properties: {'price': 9.99});
+
+      final events = await eventStorage.fetchEvents(2);
+      expect(events[0].properties![r'$sdk'], 'flutter');
+      expect(events[1].properties![r'$sdk'], 'flutter');
+    });
+
+    test(r'$sdk is not overridable by user properties', () async {
+      await configureSDK();
+
+      MostlyGoodMetrics.track('evt', properties: {r'$sdk': 'not-flutter'});
+
+      final events = await eventStorage.fetchEvents(1);
+      expect(events[0].properties![r'$sdk'], 'flutter');
+    });
+
     test('includes session ID in event', () async {
       await configureSDK();
 

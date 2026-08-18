@@ -8,8 +8,16 @@ import 'logger.dart';
 import 'types.dart';
 import 'utils.dart';
 
-/// SDK version for metrics headers
+/// SDK version for metrics headers.
+///
+/// Must match the `version` in `pubspec.yaml`. Kept in sync by
+/// `test/version_test.dart`, which fails if the two drift apart.
 const String sdkVersion = '0.5.0';
+
+/// SDK identifier stamped on outgoing requests (`X-MGM-SDK` header) and on
+/// every event's `$sdk` property. Matches the identifier used by the other
+/// MGM SDKs (e.g. "javascript", "swift") for property-based filtering.
+const String sdkName = 'flutter';
 
 /// Result of fetching experiments from the API.
 class ExperimentsResult {
@@ -113,7 +121,7 @@ class HttpNetworkClient implements NetworkClient {
           'X-MGM-Key': config.apiKey,
           'User-Agent': 'MostlyGoodMetrics-Flutter/$sdkVersion',
           // SDK identification headers for metrics
-          'X-MGM-SDK': 'flutter',
+          'X-MGM-SDK': sdkName,
           'X-MGM-SDK-Version': sdkVersion,
           'X-MGM-Platform': MGMUtils.getPlatformName(),
           if (osVersion != null) 'X-MGM-Platform-Version': osVersion,
@@ -202,7 +210,7 @@ class HttpNetworkClient implements NetworkClient {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer ${config.apiKey}',
           'User-Agent': 'MostlyGoodMetrics-Flutter/$sdkVersion',
-          'X-MGM-SDK': 'flutter',
+          'X-MGM-SDK': sdkName,
           'X-MGM-SDK-Version': sdkVersion,
           'X-MGM-Platform': MGMUtils.getPlatformName(),
           if (osVersion != null) 'X-MGM-Platform-Version': osVersion,
@@ -268,7 +276,7 @@ class HttpNetworkClient implements NetworkClient {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer ${config.apiKey}',
           'User-Agent': 'MostlyGoodMetrics-Flutter/$sdkVersion',
-          'X-MGM-SDK': 'flutter',
+          'X-MGM-SDK': sdkName,
           'X-MGM-SDK-Version': sdkVersion,
           'X-MGM-Platform': MGMUtils.getPlatformName(),
           if (osVersion != null) 'X-MGM-Platform-Version': osVersion,
