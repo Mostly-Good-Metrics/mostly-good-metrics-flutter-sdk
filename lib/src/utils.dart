@@ -148,7 +148,8 @@ class MGMUtils {
   /// is a build id with no OS version at all.
   ///
   /// Call once during SDK configure. [deviceInfo] is injectable for testing.
-  static Future<String?> resolveOSVersion({DeviceInfoPlugin? deviceInfo}) async {
+  static Future<String?> resolveOSVersion(
+      {DeviceInfoPlugin? deviceInfo}) async {
     if (kIsWeb) {
       _osVersion = null;
       return null;

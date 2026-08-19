@@ -236,7 +236,8 @@ void main() {
       expect(MGMUtils.extractNumericVersion('no digits here'), null);
     });
 
-    test('resolveOSVersion caches a clean numeric value for getOSVersion', () async {
+    test('resolveOSVersion caches a clean numeric value for getOSVersion',
+        () async {
       final resolved = await MGMUtils.resolveOSVersion();
       final emitted = MGMUtils.getOSVersion();
 
@@ -249,7 +250,8 @@ void main() {
       expect(emitted, isNot(contains('Build')));
     });
 
-    test('osVersionFromDeviceInfo returns AndroidBuildVersion.release', () async {
+    test('osVersionFromDeviceInfo returns AndroidBuildVersion.release',
+        () async {
       final plugin = _MockDeviceInfoPlugin();
       final info = _MockAndroidDeviceInfo();
       final version = _MockAndroidBuildVersion();
