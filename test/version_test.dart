@@ -8,8 +8,8 @@ import 'package:mostly_good_metrics_flutter/src/network.dart';
 void main() {
   test('sdkVersion matches pubspec.yaml version', () {
     final pubspec = File('pubspec.yaml').readAsStringSync();
-    final match = RegExp(r'^version:\s*(.+)$', multiLine: true)
-        .firstMatch(pubspec);
+    final match =
+        RegExp(r'^version:\s*(.+)$', multiLine: true).firstMatch(pubspec);
 
     expect(match, isNotNull, reason: 'version not found in pubspec.yaml');
 

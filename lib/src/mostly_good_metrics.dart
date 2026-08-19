@@ -142,6 +142,10 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
     mgm._stateStorage = stateStorage ?? PreferencesStateStorage();
     mgm._networkClient = networkClient ?? HttpNetworkClient();
 
+    // Resolve the clean numeric OS version once (async via device_info_plus)
+    // and cache it so every tracked event carries a consistent value.
+    await MGMUtils.resolveOSVersion();
+
     // Restore persisted state
     await mgm._restoreState();
 

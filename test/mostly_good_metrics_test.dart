@@ -1635,6 +1635,9 @@ void main() {
       // Functional fields are still sent
       expect(events[0].platform, isNotEmpty);
       expect(events[0].osVersion, isNotNull);
+      // MGM-203: os_version must be clean and numeric (no "Version"/"Build"
+      // prefixes, no Android build ids).
+      expect(events[0].osVersion, matches(RegExp(r'^[0-9]+(\.[0-9]+){0,2}$')));
       expect(events[0].appVersion, '1.0.0');
 
       final json = events[0].toJson();
