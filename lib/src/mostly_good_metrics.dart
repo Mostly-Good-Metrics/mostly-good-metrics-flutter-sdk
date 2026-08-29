@@ -295,6 +295,13 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
       return;
     }
 
+    // In DEBUG builds, report name mistakes before rejecting the event. This
+    // must precede the throw below so callers can see why a public track()
+    // call failed without having to inspect the exception alone.
+    if (kDebugMode) {
+      _emitDebugDiagnostics(name);
+    }
+
     // Validate event name
     final nameError = MGMUtils.validateEventName(name);
     if (nameError != null) {
@@ -310,11 +317,9 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
           ...contextProperties,
           if (properties != null) ...properties,
         },
+        includeName: false,
       )) {
-        // Deliberately independent of enableDebugLogging: these diagnostics
-        // are for developers while running a DEBUG build, not production log
-        // collection.
-        debugPrint('[MostlyGoodMetrics] WARNING: $message');
+        _emitDebugMessage(message);
       }
     }
 
@@ -375,6 +380,19 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
       );
       return const {};
     }
+  }
+
+  static void _emitDebugDiagnostics(String name) {
+    for (final message in MGMUtils.debugValidationMessages(name)) {
+      _emitDebugMessage(message);
+    }
+  }
+
+  static void _emitDebugMessage(String message) {
+    // Deliberately independent of enableDebugLogging: these diagnostics are
+    // for developers while running a DEBUG build, not production log
+    // collection.
+    debugPrint('[MostlyGoodMetrics] WARNING: $message');
   }
 
   /// Identify the current user with optional profile data.

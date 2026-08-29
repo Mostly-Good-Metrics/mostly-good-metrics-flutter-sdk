@@ -37,16 +37,19 @@ class MGMUtils {
   static List<String> debugValidationMessages(
     String name, {
     Map<String, dynamic>? properties,
+    bool includeName = true,
   }) {
     final messages = <String>[];
-    final nameError = validateEventName(name);
-    if (nameError != null) {
-      messages.add('Invalid event name "$name": $nameError');
-    } else if (name.startsWith(r'$') && !internalEventNames.contains(name)) {
-      messages.add(
-        'Event name "$name" uses the reserved \$ prefix. '
-        'Choose a name without \$.',
-      );
+    if (includeName) {
+      final nameError = validateEventName(name);
+      if (nameError != null) {
+        messages.add('Invalid event name "$name": $nameError');
+      } else if (name.startsWith(r'$') && !internalEventNames.contains(name)) {
+        messages.add(
+          'Event name "$name" uses the reserved \$ prefix. '
+          'Choose a name without \$.',
+        );
+      }
     }
 
     // Internal events legitimately use MGM-reserved properties. They must not
@@ -230,12 +233,13 @@ class MGMUtils {
     required bool isAndroid,
     required bool isIOS,
     required bool isMacOS,
-  }) => _osVersionFromDeviceInfo(
-    deviceInfo,
-    isAndroid: isAndroid,
-    isIOS: isIOS,
-    isMacOS: isMacOS,
-  );
+  }) =>
+      _osVersionFromDeviceInfo(
+        deviceInfo,
+        isAndroid: isAndroid,
+        isIOS: isIOS,
+        isMacOS: isMacOS,
+      );
 
   static Future<String?> _osVersionFromDeviceInfo(
     DeviceInfoPlugin deviceInfo, {

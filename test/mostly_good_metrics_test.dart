@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mostly_good_metrics_flutter/mostly_good_metrics_flutter.dart';
 
@@ -277,6 +278,23 @@ void main() {
           ),
         ),
       );
+    });
+
+    test('emits a DEBUG diagnostic before rejecting an invalid public event',
+        () async {
+      await configureSDK();
+      final messages = <String>[];
+      final originalDebugPrint = debugPrint;
+      debugPrint = (String? message, {int? wrapWidth}) {
+        messages.add(message ?? '');
+      };
+      addTearDown(() => debugPrint = originalDebugPrint);
+
+      expect(
+        () => MostlyGoodMetrics.track('invalid-name'),
+        throwsA(isA<MGMError>()),
+      );
+      expect(messages, contains(contains('Invalid event name')));
     });
 
     test('throws on empty event name', () async {
