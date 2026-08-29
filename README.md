@@ -15,6 +15,8 @@ Documentation: [docs.mostlygoodmetrics.com](https://docs.mostlygoodmetrics.com)
 - [Tracking Events](#tracking-events)
 - [Event Naming](#event-naming)
 - [Properties](#properties)
+- [Dynamic Context](#dynamic-context)
+- [Migrating an Existing Installation](#migrating-an-existing-installation)
 - [Automatic Events](#automatic-events)
 - [Automatic Context](#automatic-context)
 - [Automatic Behavior](#automatic-behavior)
@@ -110,6 +112,10 @@ await MostlyGoodMetrics.configure(
     maxStoredEvents: 10000,
     enableDebugLogging: kDebugMode,
     trackAppLifecycleEvents: true,
+    existingInstallation: false,
+    contextProvider: () => {
+      'current_screen': currentScreenName(),
+    },
     optedOutByDefault: false,
     collectDeviceProperties: true,
   ),
@@ -127,6 +133,8 @@ await MostlyGoodMetrics.configure(
 | `maxStoredEvents` | `10000` | Max cached events |
 | `enableDebugLogging` | `false` | Enable debug output |
 | `trackAppLifecycleEvents` | `true` | Auto-track lifecycle events |
+| `existingInstallation` | `false` | Seed lifecycle state during a provider migration; prevents a false `$app_installed` for the current `appVersion` |
+| `contextProvider` | - | Dynamic properties evaluated for every event; see [Dynamic Context](#dynamic-context) |
 | `experimentMode` | `MGMExperimentMode.server` | How experiment variants are assigned (see [Local Experiment Enrollment](#local-experiment-enrollment)) |
 | `localExperiments` | - | Inline experiment definitions for local mode (zero-network enrollment) |
 | `optedOutByDefault` | `false` | Start opted out (for consent-first apps) |
@@ -217,6 +225,52 @@ MostlyGoodMetrics.track('checkout', properties: {
 - String values: max 1000 characters
 - Nesting depth: max 3 levels
 - Total event payload: max 10KB
+
+## Dynamic Context
+
+Use `contextProvider` for properties that can change during a session. It runs
+immediately before each event is recorded:
+
+```dart
+await MostlyGoodMetrics.configure(
+  MGMConfiguration(
+    apiKey: 'mgm_proj_your_api_key',
+    contextProvider: () => {
+      'screen': currentScreenName(),
+      'plan': currentPlan(),
+    },
+  ),
+);
+```
+
+Property precedence is deterministic: **super properties < dynamic context <
+event properties < MGM system properties**. MGM system properties such as
+`$sdk` cannot be overwritten.
+
+## Migrating an Existing Installation
+
+When replacing another analytics SDK in an already-shipped app, derive
+`existingInstallation` from that provider's persisted installation marker for
+each device. MGM stores the current `appVersion` as lifecycle state and does
+**not** emit `$app_installed` for users with that marker:
+
+```dart
+await MostlyGoodMetrics.configure(
+  MGMConfiguration(
+    apiKey: 'mgm_proj_your_api_key',
+    appVersion: '2.4.0',
+    existingInstallation: legacyAnalytics.hasInstallationMarker,
+  ),
+);
+```
+
+Do **not** set `existingInstallation: true` for every user in a migration
+release: that would suppress genuine new installs. Once the legacy marker is
+no longer needed, remove this migration-specific configuration.
+
+In DEBUG builds, MGM logs diagnostics for invalid event names and custom
+property keys beginning with `$`; those prefixes are reserved for MGM. SDK
+internal events do not generate these warnings.
 
 ## Automatic Events
 

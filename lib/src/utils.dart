@@ -9,14 +9,60 @@ class MGMUtils {
   /// Regular expression for validating event names.
   /// Event names must start with a letter (or $) and contain only
   /// alphanumeric characters, underscores, and spaces.
-  static final RegExp _eventNameRegex =
-      RegExp(r'^(\$)?[a-zA-Z][a-zA-Z0-9_ ]*$');
+  static final RegExp _eventNameRegex = RegExp(
+    r'^(\$)?[a-zA-Z][a-zA-Z0-9_ ]*$',
+  );
 
   /// Maximum length for event names.
   static const int maxEventNameLength = 255;
 
   /// Maximum depth for nested properties.
   static const int maxPropertyDepth = 3;
+
+  /// MGM event names created internally by the SDK.
+  static const Set<String> internalEventNames = {
+    r'$app_opened',
+    r'$app_backgrounded',
+    r'$app_installed',
+    r'$app_updated',
+    r'$identify',
+    r'$experiment_exposure',
+  };
+
+  /// Returns developer-facing diagnostics for reserved event/property names.
+  ///
+  /// This deliberately does not reject events: the normal validators remain
+  /// the source of truth. Callers only invoke this in DEBUG builds so release
+  /// apps never pay for or emit these diagnostics.
+  static List<String> debugValidationMessages(
+    String name, {
+    Map<String, dynamic>? properties,
+  }) {
+    final messages = <String>[];
+    final nameError = validateEventName(name);
+    if (nameError != null) {
+      messages.add('Invalid event name "$name": $nameError');
+    } else if (name.startsWith(r'$') && !internalEventNames.contains(name)) {
+      messages.add(
+        'Event name "$name" uses the reserved \$ prefix. '
+        'Choose a name without \$.',
+      );
+    }
+
+    // Internal events legitimately use MGM-reserved properties. They must not
+    // create noise in DEBUG logs.
+    if (!internalEventNames.contains(name)) {
+      for (final key in properties?.keys ?? const <String>[]) {
+        if (key.startsWith(r'$')) {
+          messages.add(
+            'Property "$key" uses the reserved \$ prefix and may be '
+            'overwritten by MGM system properties.',
+          );
+        }
+      }
+    }
+    return messages;
+  }
 
   /// Validates an event name.
   /// Returns null if valid, or an error message if invalid.
@@ -91,8 +137,10 @@ class MGMUtils {
   static String generateRandomString(int length) {
     const chars = '0123456789abcdefghijklmnopqrstuvwxyz';
     final random = Random.secure();
-    return List.generate(length, (_) => chars[random.nextInt(chars.length)])
-        .join();
+    return List.generate(
+      length,
+      (_) => chars[random.nextInt(chars.length)],
+    ).join();
   }
 
   /// Generates an anonymous user ID with $anon_ prefix.
@@ -182,13 +230,12 @@ class MGMUtils {
     required bool isAndroid,
     required bool isIOS,
     required bool isMacOS,
-  }) =>
-      _osVersionFromDeviceInfo(
-        deviceInfo,
-        isAndroid: isAndroid,
-        isIOS: isIOS,
-        isMacOS: isMacOS,
-      );
+  }) => _osVersionFromDeviceInfo(
+    deviceInfo,
+    isAndroid: isAndroid,
+    isIOS: isIOS,
+    isMacOS: isMacOS,
+  );
 
   static Future<String?> _osVersionFromDeviceInfo(
     DeviceInfoPlugin deviceInfo, {

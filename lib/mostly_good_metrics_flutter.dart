@@ -31,6 +31,7 @@ export 'src/mostly_good_metrics.dart' show MostlyGoodMetrics;
 export 'src/types.dart'
     show
         MGMConfiguration,
+        MGMContextProvider,
         MGMEvent,
         MGMError,
         MGMErrorType,

@@ -71,6 +71,35 @@ void main() {
     });
   });
 
+  group('MGMUtils.debugValidationMessages', () {
+    test('warns about invalid event names and reserved property keys', () {
+      final messages = MGMUtils.debugValidationMessages(
+        'event-name',
+        properties: {r'$custom': true},
+      );
+
+      expect(messages, hasLength(2));
+      expect(messages.first, contains('Invalid event name'));
+      expect(messages.last, contains(r'$custom'));
+    });
+
+    test('does not warn for internal events or their reserved properties', () {
+      final messages = MGMUtils.debugValidationMessages(
+        r'$identify',
+        properties: {r'$anonymous_id': r'$anon_123'},
+      );
+
+      expect(messages, isEmpty);
+    });
+
+    test('warns about custom events using the reserved prefix', () {
+      final messages = MGMUtils.debugValidationMessages(r'$custom_event');
+
+      expect(messages, hasLength(1));
+      expect(messages.single, contains('reserved'));
+    });
+  });
+
   group('MGMUtils.validateProperties', () {
     test('accepts null properties', () {
       expect(MGMUtils.validateProperties(null), null);
@@ -93,9 +122,7 @@ void main() {
     test('accepts properties with nested objects up to 3 levels', () {
       final props = {
         'level1': {
-          'level2': {
-            'level3': 'value',
-          },
+          'level2': {'level3': 'value'},
         },
       };
       expect(MGMUtils.validateProperties(props), null);
@@ -105,9 +132,7 @@ void main() {
       final props = {
         'level1': {
           'level2': {
-            'level3': {
-              'level4': 'too deep',
-            },
+            'level3': {'level4': 'too deep'},
           },
         },
       };
@@ -139,9 +164,7 @@ void main() {
           {
             'nested': {
               'deeper': {
-                'too_deep': {
-                  'value': 'fail',
-                },
+                'too_deep': {'value': 'fail'},
               },
             },
           },
@@ -236,39 +259,43 @@ void main() {
       expect(MGMUtils.extractNumericVersion('no digits here'), null);
     });
 
-    test('resolveOSVersion caches a clean numeric value for getOSVersion',
-        () async {
-      final resolved = await MGMUtils.resolveOSVersion();
-      final emitted = MGMUtils.getOSVersion();
+    test(
+      'resolveOSVersion caches a clean numeric value for getOSVersion',
+      () async {
+        final resolved = await MGMUtils.resolveOSVersion();
+        final emitted = MGMUtils.getOSVersion();
 
-      // getOSVersion() reflects the resolved cache.
-      expect(emitted, resolved);
-      // The emitted value must be numeric with no "Version"/"Build"/build ids.
-      expect(emitted, isNotNull);
-      expect(emitted, matches(_numericOSVersion));
-      expect(emitted, isNot(contains('Version')));
-      expect(emitted, isNot(contains('Build')));
-    });
+        // getOSVersion() reflects the resolved cache.
+        expect(emitted, resolved);
+        // The emitted value must be numeric with no "Version"/"Build"/build ids.
+        expect(emitted, isNotNull);
+        expect(emitted, matches(_numericOSVersion));
+        expect(emitted, isNot(contains('Version')));
+        expect(emitted, isNot(contains('Build')));
+      },
+    );
 
-    test('osVersionFromDeviceInfo returns AndroidBuildVersion.release',
-        () async {
-      final plugin = _MockDeviceInfoPlugin();
-      final info = _MockAndroidDeviceInfo();
-      final version = _MockAndroidBuildVersion();
-      when(() => plugin.androidInfo).thenAnswer((_) async => info);
-      when(() => info.version).thenReturn(version);
-      when(() => version.release).thenReturn('14');
+    test(
+      'osVersionFromDeviceInfo returns AndroidBuildVersion.release',
+      () async {
+        final plugin = _MockDeviceInfoPlugin();
+        final info = _MockAndroidDeviceInfo();
+        final version = _MockAndroidBuildVersion();
+        when(() => plugin.androidInfo).thenAnswer((_) async => info);
+        when(() => info.version).thenReturn(version);
+        when(() => version.release).thenReturn('14');
 
-      final result = await MGMUtils.osVersionFromDeviceInfo(
-        plugin,
-        isAndroid: true,
-        isIOS: false,
-        isMacOS: false,
-      );
+        final result = await MGMUtils.osVersionFromDeviceInfo(
+          plugin,
+          isAndroid: true,
+          isIOS: false,
+          isMacOS: false,
+        );
 
-      expect(result, '14');
-      expect(result, matches(_numericOSVersion));
-    });
+        expect(result, '14');
+        expect(result, matches(_numericOSVersion));
+      },
+    );
 
     test('osVersionFromDeviceInfo returns iOS systemVersion', () async {
       final plugin = _MockDeviceInfoPlugin();
