@@ -12,7 +12,7 @@ import 'utils.dart';
 ///
 /// Must match the `version` in `pubspec.yaml`. Kept in sync by
 /// `test/version_test.dart`, which fails if the two drift apart.
-const String sdkVersion = '0.5.1';
+const String sdkVersion = '0.6.0';
 
 /// SDK identifier stamped on outgoing requests (`X-MGM-SDK` header) and on
 /// every event's `$sdk` property. Matches the identifier used by the other
