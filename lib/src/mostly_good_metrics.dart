@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/widgets.dart';
+import 'package:flutter/foundation.dart' show debugPrint, kDebugMode;
 
 import 'bucketing.dart';
 import 'logger.dart';
@@ -202,8 +203,9 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
     final superPropsJson = await _stateStorage!.getString(_superPropertiesKey);
     if (superPropsJson != null) {
       try {
-        _superProperties =
-            Map<String, dynamic>.from(json.decode(superPropsJson) as Map);
+        _superProperties = Map<String, dynamic>.from(
+          json.decode(superPropsJson) as Map,
+        );
         MGMLogger.debug(
           'Restored super properties: ${_superProperties.keys.join(', ')}',
         );
@@ -215,8 +217,9 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
 
     // Restore exposure dedup state
     _trackedExposures = {};
-    final exposuresJson =
-        await _stateStorage!.getString(_experimentExposuresKey);
+    final exposuresJson = await _stateStorage!.getString(
+      _experimentExposuresKey,
+    );
     if (exposuresJson != null) {
       try {
         _trackedExposures = (json.decode(exposuresJson) as List<dynamic>)
@@ -236,7 +239,12 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
 
     if (storedVersion == null) {
       // First install
-      if (_config!.trackAppLifecycleEvents) {
+      if (_config!.existingInstallation) {
+        MGMLogger.debug(
+          'Seeded lifecycle state for existing installation; '
+          'skipping \$app_installed',
+        );
+      } else if (_config!.trackAppLifecycleEvents) {
         track(r'$app_installed');
       }
     } else if (storedVersion != currentVersion) {
@@ -271,8 +279,8 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
   /// Optional [properties] can be provided as a map of key-value pairs.
   /// Properties can be nested up to 3 levels deep.
   ///
-  /// Super properties are automatically merged with event properties.
-  /// Event properties override super properties if there's a key conflict.
+  /// Property precedence is: super properties < context provider < event
+  /// properties < MGM system properties.
   ///
   /// Does nothing while the user is opted out (see [optOut]).
   ///
@@ -287,21 +295,39 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
       return;
     }
 
+    // In DEBUG builds, report name mistakes before rejecting the event. This
+    // must precede the throw below so callers can see why a public track()
+    // call failed without having to inspect the exception alone.
+    if (kDebugMode) {
+      _emitDebugDiagnostics(name);
+    }
+
     // Validate event name
     final nameError = MGMUtils.validateEventName(name);
     if (nameError != null) {
-      throw MGMError(
-        type: MGMErrorType.invalidEventName,
-        message: nameError,
-      );
+      throw MGMError(type: MGMErrorType.invalidEventName, message: nameError);
     }
 
-    // Merge properties: super properties < event properties < system properties
-    // Event properties override super properties; system properties (e.g. $sdk)
-    // are always added last so every event carries them, matching the other
-    // MGM SDKs (JS, Swift, etc.) for property-based filtering/breakdowns.
+    final contextProperties = mgm._contextProperties();
+
+    if (kDebugMode) {
+      for (final message in MGMUtils.debugValidationMessages(
+        name,
+        properties: {
+          ...contextProperties,
+          if (properties != null) ...properties,
+        },
+        includeName: false,
+      )) {
+        _emitDebugMessage(message);
+      }
+    }
+
+    // Merge properties: super < context < event < system. System properties
+    // (e.g. $sdk) are always added last so callers cannot spoof MGM metadata.
     final mergedProperties = <String, dynamic>{
       ...mgm._superProperties,
+      ...contextProperties,
       if (properties != null) ...properties,
       r'$sdk': sdkName,
     };
@@ -311,10 +337,7 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
       mergedProperties.isEmpty ? null : mergedProperties,
     );
     if (propsError != null) {
-      throw MGMError(
-        type: MGMErrorType.invalidProperties,
-        message: propsError,
-      );
+      throw MGMError(type: MGMErrorType.invalidProperties, message: propsError);
     }
 
     final event = MGMEvent(
@@ -339,6 +362,37 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
 
     mgm._eventStorage!.store(event);
     MGMLogger.debug('Tracked event: $name');
+  }
+
+  Map<String, dynamic> _contextProperties() {
+    final provider = _config?.contextProvider;
+    if (provider == null) return const {};
+
+    try {
+      // Snapshot the result so a provider retaining its map cannot mutate a
+      // queued event after it has been recorded.
+      return Map<String, dynamic>.from(provider());
+    } catch (error, stackTrace) {
+      MGMLogger.error(
+        'Context provider failed; tracking without context',
+        error,
+        stackTrace,
+      );
+      return const {};
+    }
+  }
+
+  static void _emitDebugDiagnostics(String name) {
+    for (final message in MGMUtils.debugValidationMessages(name)) {
+      _emitDebugMessage(message);
+    }
+  }
+
+  static void _emitDebugMessage(String message) {
+    // Deliberately independent of enableDebugLogging: these diagnostics are
+    // for developers while running a DEBUG build, not production log
+    // collection.
+    debugPrint('[MostlyGoodMetrics] WARNING: $message');
   }
 
   /// Identify the current user with optional profile data.
@@ -700,8 +754,9 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
     final cachedUserId = await _stateStorage!.getString(_experimentsUserIdKey);
     if (cachedUserId != _effectiveUserId) return true;
 
-    final fetchedAtStr =
-        await _stateStorage!.getString(_experimentsFetchedAtKey);
+    final fetchedAtStr = await _stateStorage!.getString(
+      _experimentsFetchedAtKey,
+    );
     final fetchedAt = fetchedAtStr != null ? int.tryParse(fetchedAtStr) : null;
     if (fetchedAt == null) return true;
 
@@ -827,13 +882,15 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
   /// Restore sticky local assignments (experiment UUID -> variant).
   Future<void> _restoreLocalAssignments() async {
     _localAssignments = {};
-    final assignmentsJson =
-        await _stateStorage!.getString(_localExperimentAssignmentsKey);
+    final assignmentsJson = await _stateStorage!.getString(
+      _localExperimentAssignmentsKey,
+    );
     if (assignmentsJson == null) return;
     try {
       final decoded = json.decode(assignmentsJson) as Map<String, dynamic>;
-      _localAssignments =
-          decoded.map((key, value) => MapEntry(key, value.toString()));
+      _localAssignments = decoded.map(
+        (key, value) => MapEntry(key, value.toString()),
+      );
     } catch (e) {
       MGMLogger.warning('Failed to restore local experiment assignments: $e');
     }
@@ -848,8 +905,9 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
 
   /// Restore local experiment configs from the cache (no expiry).
   Future<List<MGMExperimentConfig>?> _restoreLocalConfigsFromCache() async {
-    final configsJson =
-        await _stateStorage!.getString(_localExperimentConfigsKey);
+    final configsJson = await _stateStorage!.getString(
+      _localExperimentConfigsKey,
+    );
     if (configsJson == null) return null;
     try {
       return (json.decode(configsJson) as List<dynamic>)
@@ -864,8 +922,9 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
   /// Whether a background refetch of local experiment configs is due
   /// (more than ~1h since the last fetch).
   Future<bool> _shouldRefetchLocalConfigs() async {
-    final fetchedAtStr =
-        await _stateStorage!.getString(_localExperimentConfigsFetchedAtKey);
+    final fetchedAtStr = await _stateStorage!.getString(
+      _localExperimentConfigsFetchedAtKey,
+    );
     final fetchedAt = fetchedAtStr != null ? int.tryParse(fetchedAtStr) : null;
     if (fetchedAt == null) return true;
 
@@ -1044,10 +1103,7 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
 
     track(
       r'$experiment_exposure',
-      properties: {
-        r'$experiment_name': experimentName,
-        r'$variant': variant,
-      },
+      properties: {r'$experiment_name': experimentName, r'$variant': variant},
     );
     MGMLogger.debug(
       'Tracked exposure for experiment "$experimentName" variant "$variant"',

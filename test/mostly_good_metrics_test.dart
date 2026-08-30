@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mostly_good_metrics_flutter/mostly_good_metrics_flutter.dart';
 
@@ -26,6 +27,8 @@ void main() {
     String? appVersion,
     bool optedOutByDefault = false,
     bool collectDeviceProperties = true,
+    bool existingInstallation = false,
+    MGMContextProvider? contextProvider,
   }) async {
     await MostlyGoodMetrics.configure(
       MGMConfiguration(
@@ -34,6 +37,8 @@ void main() {
         appVersion: appVersion,
         optedOutByDefault: optedOutByDefault,
         collectDeviceProperties: collectDeviceProperties,
+        existingInstallation: existingInstallation,
+        contextProvider: contextProvider,
       ),
       eventStorage: eventStorage,
       stateStorage: stateStorage,
@@ -67,13 +72,15 @@ void main() {
       expect(events[0].name, r'$app_opened');
     });
 
-    test(r'does not track $app_opened when lifecycle events disabled',
-        () async {
-      await configureSDK(trackLifecycleEvents: false);
+    test(
+      r'does not track $app_opened when lifecycle events disabled',
+      () async {
+        await configureSDK(trackLifecycleEvents: false);
 
-      final count = await eventStorage.eventCount();
-      expect(count, 0);
-    });
+        final count = await eventStorage.eventCount();
+        expect(count, 0);
+      },
+    );
 
     test('allows reconfiguration', () async {
       await configureSDK();
@@ -83,6 +90,38 @@ void main() {
       final secondSessionId = MostlyGoodMetrics.sessionId;
 
       expect(firstSessionId, isNot(secondSessionId));
+    });
+
+    test(r'seeds lifecycle state for an existing installation', () async {
+      await configureSDK(
+        trackLifecycleEvents: true,
+        appVersion: '2.4.0',
+        existingInstallation: true,
+      );
+
+      final events = await eventStorage.fetchEvents(10);
+      expect(events.map((event) => event.name), [r'$app_opened']);
+      expect(await stateStorage.getString('appVersion'), '2.4.0');
+    });
+
+    test(r'emits $app_updated after lifecycle state has been seeded', () async {
+      await configureSDK(
+        trackLifecycleEvents: true,
+        appVersion: '2.4.0',
+        existingInstallation: true,
+      );
+      MostlyGoodMetrics.reset();
+
+      await configureSDK(trackLifecycleEvents: true, appVersion: '2.5.0');
+
+      final events = await eventStorage.fetchEvents(10);
+      expect(events.map((event) => event.name), [
+        r'$app_opened',
+        r'$app_updated',
+        r'$app_opened',
+      ]);
+      expect(events[1].properties!['previous_version'], '2.4.0');
+      expect(events[1].properties!['current_version'], '2.5.0');
     });
   });
 
@@ -111,11 +150,7 @@ void main() {
 
       MostlyGoodMetrics.track(
         'purchase',
-        properties: {
-          'product_id': 'abc123',
-          'price': 9.99,
-          'currency': 'USD',
-        },
+        properties: {'product_id': 'abc123', 'price': 9.99, 'currency': 'USD'},
       );
 
       final events = await eventStorage.fetchEvents(1);
@@ -145,6 +180,61 @@ void main() {
 
       final events = await eventStorage.fetchEvents(1);
       expect(events[0].properties![r'$sdk'], 'flutter');
+    });
+
+    test('evaluates dynamic context for every event', () async {
+      var currentScreen = 'home';
+      await configureSDK(contextProvider: () => {'screen': currentScreen});
+
+      MostlyGoodMetrics.track('viewed_screen');
+      currentScreen = 'settings';
+      MostlyGoodMetrics.track('viewed_screen');
+
+      final events = await eventStorage.fetchEvents(10);
+      expect(events[0].properties!['screen'], 'home');
+      expect(events[1].properties!['screen'], 'settings');
+    });
+
+    test('uses documented property precedence', () async {
+      await configureSDK(
+        contextProvider: () => {
+          'plan': 'context',
+          'context_only': true,
+          r'$sdk': 'context-spoof',
+        },
+      );
+      await MostlyGoodMetrics.setSuperProperties({
+        'plan': 'super',
+        'super_only': true,
+      });
+
+      MostlyGoodMetrics.track(
+        'purchase',
+        properties: {
+          'plan': 'event',
+          'event_only': true,
+          r'$sdk': 'event-spoof',
+        },
+      );
+
+      final properties = (await eventStorage.fetchEvents(1)).single.properties!;
+      expect(properties['plan'], 'event');
+      expect(properties['super_only'], true);
+      expect(properties['context_only'], true);
+      expect(properties['event_only'], true);
+      expect(properties[r'$sdk'], 'flutter');
+    });
+
+    test('continues tracking when a context provider throws', () async {
+      await configureSDK(
+        contextProvider: () => throw StateError('context unavailable'),
+      );
+
+      MostlyGoodMetrics.track('still_tracked');
+
+      final event = (await eventStorage.fetchEvents(1)).single;
+      expect(event.name, 'still_tracked');
+      expect(event.properties![r'$sdk'], 'flutter');
     });
 
     test('includes session ID in event', () async {
@@ -190,6 +280,23 @@ void main() {
       );
     });
 
+    test('emits a DEBUG diagnostic before rejecting an invalid public event',
+        () async {
+      await configureSDK();
+      final messages = <String>[];
+      final originalDebugPrint = debugPrint;
+      debugPrint = (String? message, {int? wrapWidth}) {
+        messages.add(message ?? '');
+      };
+      addTearDown(() => debugPrint = originalDebugPrint);
+
+      expect(
+        () => MostlyGoodMetrics.track('invalid-name'),
+        throwsA(isA<MGMError>()),
+      );
+      expect(messages, contains(contains('Invalid event name')));
+    });
+
     test('throws on empty event name', () async {
       await configureSDK();
 
@@ -214,9 +321,7 @@ void main() {
           properties: {
             'l1': {
               'l2': {
-                'l3': {
-                  'l4': 'too deep',
-                },
+                'l3': {'l4': 'too deep'},
               },
             },
           },
@@ -301,10 +406,7 @@ void main() {
 
       await MostlyGoodMetrics.identify(
         'user-both',
-        profile: const UserProfile(
-          email: 'both@example.com',
-          name: 'Jane Doe',
-        ),
+        profile: const UserProfile(email: 'both@example.com', name: 'Jane Doe'),
       );
 
       final events = await eventStorage.fetchEvents(10);
@@ -582,9 +684,9 @@ void main() {
       final events = await eventStorage.fetchEvents(1);
 
       expect(
-        events[0]
-            .timestamp
-            .isAfter(before.subtract(const Duration(seconds: 1))),
+        events[0].timestamp.isAfter(
+              before.subtract(const Duration(seconds: 1)),
+            ),
         true,
       );
       expect(
@@ -608,24 +710,23 @@ void main() {
       expect(MostlyGoodMetrics.getVariant('pricing_test'), 'control');
 
       // The initial fetch uses the anonymous ID with no anonymous_id param.
-      expect(
-        networkClient.experimentsFetchedForUsers,
-        [MostlyGoodMetrics.anonymousId],
-      );
+      expect(networkClient.experimentsFetchedForUsers, [
+        MostlyGoodMetrics.anonymousId,
+      ]);
       expect(networkClient.experimentsFetchedWithAnonymousIds, [null]);
     });
 
-    test('returns null for unknown experiment and never buckets locally',
-        () async {
-      networkClient.experimentsToReturn = {
-        'onboarding_flow': 'treatment',
-      };
+    test(
+      'returns null for unknown experiment and never buckets locally',
+      () async {
+        networkClient.experimentsToReturn = {'onboarding_flow': 'treatment'};
 
-      await configureSDK();
-      expect(await MostlyGoodMetrics.ready(), true);
+        await configureSDK();
+        expect(await MostlyGoodMetrics.ready(), true);
 
-      expect(MostlyGoodMetrics.getVariant('unknown_experiment'), null);
-    });
+        expect(MostlyGoodMetrics.getVariant('unknown_experiment'), null);
+      },
+    );
 
     test('returns fallback for unknown experiment', () async {
       networkClient.experimentsToReturn = {};
@@ -678,40 +779,40 @@ void main() {
       );
     });
 
-    test('sets super property with experiment prefix when variant accessed',
-        () async {
-      networkClient.experimentsToReturn = {
-        'My Experiment': 'treatment',
-      };
+    test(
+      'sets super property with experiment prefix when variant accessed',
+      () async {
+        networkClient.experimentsToReturn = {'My Experiment': 'treatment'};
 
-      await configureSDK();
-      expect(await MostlyGoodMetrics.ready(), true);
+        await configureSDK();
+        expect(await MostlyGoodMetrics.ready(), true);
 
-      MostlyGoodMetrics.getVariant('My Experiment');
+        MostlyGoodMetrics.getVariant('My Experiment');
 
-      // Wait a tick for async super property save
-      await Future<void>.delayed(Duration.zero);
+        // Wait a tick for async super property save
+        await Future<void>.delayed(Duration.zero);
 
-      final superProps = MostlyGoodMetrics.getSuperProperties();
-      expect(superProps[r'$experiment_my__experiment'], 'treatment');
-    });
+        final superProps = MostlyGoodMetrics.getSuperProperties();
+        expect(superProps[r'$experiment_my__experiment'], 'treatment');
+      },
+    );
 
-    test('sets snake_case super property for camelCase experiment name',
-        () async {
-      networkClient.experimentsToReturn = {
-        'myExperimentName': 'variant_b',
-      };
+    test(
+      'sets snake_case super property for camelCase experiment name',
+      () async {
+        networkClient.experimentsToReturn = {'myExperimentName': 'variant_b'};
 
-      await configureSDK();
-      expect(await MostlyGoodMetrics.ready(), true);
+        await configureSDK();
+        expect(await MostlyGoodMetrics.ready(), true);
 
-      MostlyGoodMetrics.getVariant('myExperimentName');
+        MostlyGoodMetrics.getVariant('myExperimentName');
 
-      await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
 
-      final superProps = MostlyGoodMetrics.getSuperProperties();
-      expect(superProps[r'$experiment_my_experiment_name'], 'variant_b');
-    });
+        final superProps = MostlyGoodMetrics.getSuperProperties();
+        expect(superProps[r'$experiment_my_experiment_name'], 'variant_b');
+      },
+    );
 
     test('does not set super property when variant is null', () async {
       networkClient.experimentsToReturn = {};
@@ -737,29 +838,30 @@ void main() {
       return events.where((e) => e.name == r'$experiment_exposure').toList();
     }
 
-    test(r'tracks $experiment_exposure once per user/experiment/variant',
-        () async {
-      networkClient.experimentsToReturn = {
-        'onboarding_flow': 'treatment',
-      };
+    test(
+      r'tracks $experiment_exposure once per user/experiment/variant',
+      () async {
+        networkClient.experimentsToReturn = {'onboarding_flow': 'treatment'};
 
-      await configureSDK();
-      expect(await MostlyGoodMetrics.ready(), true);
+        await configureSDK();
+        expect(await MostlyGoodMetrics.ready(), true);
 
-      MostlyGoodMetrics.getVariant('onboarding_flow');
-      MostlyGoodMetrics.getVariant('onboarding_flow');
-      MostlyGoodMetrics.getVariant('onboarding_flow');
+        MostlyGoodMetrics.getVariant('onboarding_flow');
+        MostlyGoodMetrics.getVariant('onboarding_flow');
+        MostlyGoodMetrics.getVariant('onboarding_flow');
 
-      final exposures = await exposureEvents();
-      expect(exposures.length, 1);
-      expect(exposures[0].properties?[r'$experiment_name'], 'onboarding_flow');
-      expect(exposures[0].properties?[r'$variant'], 'treatment');
-    });
+        final exposures = await exposureEvents();
+        expect(exposures.length, 1);
+        expect(
+          exposures[0].properties?[r'$experiment_name'],
+          'onboarding_flow',
+        );
+        expect(exposures[0].properties?[r'$variant'], 'treatment');
+      },
+    );
 
     test('exposure dedup survives a simulated restart', () async {
-      networkClient.experimentsToReturn = {
-        'onboarding_flow': 'treatment',
-      };
+      networkClient.experimentsToReturn = {'onboarding_flow': 'treatment'};
 
       await configureSDK();
       expect(await MostlyGoodMetrics.ready(), true);
@@ -854,10 +956,7 @@ void main() {
     });
 
     test('default timeout is 5 seconds', () {
-      expect(
-        MostlyGoodMetrics.defaultReadyTimeout,
-        const Duration(seconds: 5),
-      );
+      expect(MostlyGoodMetrics.defaultReadyTimeout, const Duration(seconds: 5));
     });
   });
 
@@ -876,37 +975,37 @@ void main() {
       expect(storedExperiments, contains('cached_experiment'));
     });
 
-    test('restores variants from cache on reconfigure without refetching',
-        () async {
-      networkClient.experimentsToReturn = {
-        'cached_experiment': 'cached_variant',
-      };
+    test(
+      'restores variants from cache on reconfigure without refetching',
+      () async {
+        networkClient.experimentsToReturn = {
+          'cached_experiment': 'cached_variant',
+        };
 
-      await configureSDK();
-      expect(await MostlyGoodMetrics.ready(), true);
+        await configureSDK();
+        expect(await MostlyGoodMetrics.ready(), true);
 
-      // Reset and reconfigure with same storage (simulating app restart)
-      MostlyGoodMetrics.reset();
-      networkClient.experimentsFetchedForUsers.clear();
-      networkClient.experimentsToReturn = {
-        'different_experiment': 'should_not_see_this',
-      };
+        // Reset and reconfigure with same storage (simulating app restart)
+        MostlyGoodMetrics.reset();
+        networkClient.experimentsFetchedForUsers.clear();
+        networkClient.experimentsToReturn = {
+          'different_experiment': 'should_not_see_this',
+        };
 
-      await configureSDK();
-      expect(await MostlyGoodMetrics.ready(), true);
+        await configureSDK();
+        expect(await MostlyGoodMetrics.ready(), true);
 
-      // Cache served, and the refetch was throttled (recent last fetch)
-      expect(
-        MostlyGoodMetrics.getVariant('cached_experiment'),
-        'cached_variant',
-      );
-      expect(networkClient.experimentsFetchedForUsers, isEmpty);
-    });
+        // Cache served, and the refetch was throttled (recent last fetch)
+        expect(
+          MostlyGoodMetrics.getVariant('cached_experiment'),
+          'cached_variant',
+        );
+        expect(networkClient.experimentsFetchedForUsers, isEmpty);
+      },
+    );
 
     test('cached variants never expire', () async {
-      networkClient.experimentsToReturn = {
-        'old_experiment': 'old_variant',
-      };
+      networkClient.experimentsToReturn = {'old_experiment': 'old_variant'};
 
       await configureSDK();
       expect(await MostlyGoodMetrics.ready(), true);
@@ -935,51 +1034,57 @@ void main() {
       networkClient.experimentsFetchGate!.complete();
     });
 
-    test('stale cache is served immediately then refreshed in background',
-        () async {
-      networkClient.experimentsToReturn = {
-        'onboarding_flow': 'stale_variant',
-      };
+    test(
+      'stale cache is served immediately then refreshed in background',
+      () async {
+        networkClient.experimentsToReturn = {
+          'onboarding_flow': 'stale_variant',
+        };
 
-      await configureSDK();
-      expect(await MostlyGoodMetrics.ready(), true);
+        await configureSDK();
+        expect(await MostlyGoodMetrics.ready(), true);
 
-      // Age the cache past the ~1h refetch throttle
-      final twoHoursAgo = DateTime.now()
-          .subtract(const Duration(hours: 2))
-          .millisecondsSinceEpoch;
-      await stateStorage.setString(
-        'experimentsFetchedAt',
-        twoHoursAgo.toString(),
-      );
+        // Age the cache past the ~1h refetch throttle
+        final twoHoursAgo = DateTime.now()
+            .subtract(const Duration(hours: 2))
+            .millisecondsSinceEpoch;
+        await stateStorage.setString(
+          'experimentsFetchedAt',
+          twoHoursAgo.toString(),
+        );
 
-      // Restart with a gated fetch returning fresh variants
-      MostlyGoodMetrics.reset();
-      networkClient.experimentsFetchedForUsers.clear();
-      networkClient.experimentsFetchGate = Completer<void>();
-      networkClient.experimentsToReturn = {
-        'onboarding_flow': 'fresh_variant',
-      };
+        // Restart with a gated fetch returning fresh variants
+        MostlyGoodMetrics.reset();
+        networkClient.experimentsFetchedForUsers.clear();
+        networkClient.experimentsFetchGate = Completer<void>();
+        networkClient.experimentsToReturn = {
+          'onboarding_flow': 'fresh_variant',
+        };
 
-      await configureSDK();
-      await Future<void>.delayed(Duration.zero);
+        await configureSDK();
+        await Future<void>.delayed(Duration.zero);
 
-      // Stale value served while the refetch is in flight
-      expect(MostlyGoodMetrics.getVariant('onboarding_flow'), 'stale_variant');
-      expect(networkClient.experimentsFetchedForUsers, isNotEmpty);
+        // Stale value served while the refetch is in flight
+        expect(
+          MostlyGoodMetrics.getVariant('onboarding_flow'),
+          'stale_variant',
+        );
+        expect(networkClient.experimentsFetchedForUsers, isNotEmpty);
 
-      networkClient.experimentsFetchGate!.complete();
-      expect(await MostlyGoodMetrics.ready(), true);
+        networkClient.experimentsFetchGate!.complete();
+        expect(await MostlyGoodMetrics.ready(), true);
 
-      expect(MostlyGoodMetrics.getVariant('onboarding_flow'), 'fresh_variant');
-    });
+        expect(
+          MostlyGoodMetrics.getVariant('onboarding_flow'),
+          'fresh_variant',
+        );
+      },
+    );
   });
 
   group('A/B Testing - identify', () {
     test('keeps serving current variants then swaps atomically', () async {
-      networkClient.experimentsToReturn = {
-        'anon_experiment': 'anon_variant',
-      };
+      networkClient.experimentsToReturn = {'anon_experiment': 'anon_variant'};
 
       await configureSDK();
       expect(await MostlyGoodMetrics.ready(), true);
@@ -991,9 +1096,7 @@ void main() {
       networkClient.experimentsFetchedForUsers.clear();
       networkClient.experimentsFetchedWithAnonymousIds.clear();
       networkClient.experimentsFetchGate = Completer<void>();
-      networkClient.experimentsToReturn = {
-        'user_experiment': 'user_variant',
-      };
+      networkClient.experimentsToReturn = {'user_experiment': 'user_variant'};
 
       await MostlyGoodMetrics.identify('user-123');
 
@@ -1046,9 +1149,7 @@ void main() {
     });
 
     test('does not refetch when identify called with same user', () async {
-      networkClient.experimentsToReturn = {
-        'experiment': 'variant',
-      };
+      networkClient.experimentsToReturn = {'experiment': 'variant'};
 
       await configureSDK();
       await MostlyGoodMetrics.identify('user-123');
@@ -1062,16 +1163,11 @@ void main() {
       await Future<void>.delayed(Duration.zero);
 
       // Should not have fetched again
-      expect(
-        networkClient.experimentsFetchedForUsers.length,
-        fetchCount,
-      );
+      expect(networkClient.experimentsFetchedForUsers.length, fetchCount);
     });
 
     test('keeps current variants when the identify refetch fails', () async {
-      networkClient.experimentsToReturn = {
-        'anon_experiment': 'anon_variant',
-      };
+      networkClient.experimentsToReturn = {'anon_experiment': 'anon_variant'};
 
       await configureSDK();
       expect(await MostlyGoodMetrics.ready(), true);
@@ -1088,21 +1184,23 @@ void main() {
       );
     });
 
-    test('updates the cached user after a successful identify refetch',
-        () async {
-      networkClient.experimentsToReturn = {
-        'experiment': 'variant',
-      };
+    test(
+      'updates the cached user after a successful identify refetch',
+      () async {
+        networkClient.experimentsToReturn = {'experiment': 'variant'};
 
-      await configureSDK();
-      expect(await MostlyGoodMetrics.ready(), true);
+        await configureSDK();
+        expect(await MostlyGoodMetrics.ready(), true);
 
-      await MostlyGoodMetrics.identify('new-user');
-      await Future<void>.delayed(Duration.zero);
+        await MostlyGoodMetrics.identify('new-user');
+        await Future<void>.delayed(Duration.zero);
 
-      final newCachedUserId = await stateStorage.getString('experimentsUserId');
-      expect(newCachedUserId, 'new-user');
-    });
+        final newCachedUserId = await stateStorage.getString(
+          'experimentsUserId',
+        );
+        expect(newCachedUserId, 'new-user');
+      },
+    );
   });
 
   group('A/B Testing - local experiment mode', () {
@@ -1135,43 +1233,49 @@ void main() {
       await stateStorage.setString('anonymousId', anonymousId);
     }
 
-    test('buckets deterministically with inline configs and zero network',
-        () async {
-      await seedAnonymousId(r'$anon_abc123def456');
+    test(
+      'buckets deterministically with inline configs and zero network',
+      () async {
+        await seedAnonymousId(r'$anon_abc123def456');
 
-      await configureLocalSDK(localExperiments: [buttonColor]);
-      expect(await MostlyGoodMetrics.ready(), true);
+        await configureLocalSDK(localExperiments: [buttonColor]);
+        expect(await MostlyGoodMetrics.ready(), true);
 
-      expect(MostlyGoodMetrics.getVariant('button-color'), 'treatment');
+        expect(MostlyGoodMetrics.getVariant('button-color'), 'treatment');
 
-      // No requests at all: neither configs nor server assignments
-      expect(networkClient.experimentConfigsFetchCount, 0);
-      expect(networkClient.experimentsFetchedForUsers, isEmpty);
-    });
+        // No requests at all: neither configs nor server assignments
+        expect(networkClient.experimentConfigsFetchCount, 0);
+        expect(networkClient.experimentsFetchedForUsers, isEmpty);
+      },
+    );
 
-    test('buckets with the identified user ID when set before first read',
-        () async {
-      await configureLocalSDK(localExperiments: [buttonColor]);
-      expect(await MostlyGoodMetrics.ready(), true);
-      await MostlyGoodMetrics.identify('user_123');
+    test(
+      'buckets with the identified user ID when set before first read',
+      () async {
+        await configureLocalSDK(localExperiments: [buttonColor]);
+        expect(await MostlyGoodMetrics.ready(), true);
+        await MostlyGoodMetrics.identify('user_123');
 
-      expect(MostlyGoodMetrics.getVariant('button-color'), 'control');
-    });
+        expect(MostlyGoodMetrics.getVariant('button-color'), 'control');
+      },
+    );
 
-    test('fetches configs from the server when none are provided inline',
-        () async {
-      await seedAnonymousId(r'$anon_abc123def456');
-      networkClient.experimentConfigsToReturn = [buttonColor];
+    test(
+      'fetches configs from the server when none are provided inline',
+      () async {
+        await seedAnonymousId(r'$anon_abc123def456');
+        networkClient.experimentConfigsToReturn = [buttonColor];
 
-      await configureLocalSDK();
-      expect(await MostlyGoodMetrics.ready(), true);
+        await configureLocalSDK();
+        expect(await MostlyGoodMetrics.ready(), true);
 
-      expect(MostlyGoodMetrics.getVariant('button-color'), 'treatment');
-      expect(networkClient.experimentConfigsFetchCount, 1);
+        expect(MostlyGoodMetrics.getVariant('button-color'), 'treatment');
+        expect(networkClient.experimentConfigsFetchCount, 1);
 
-      // The user ID never leaves the device for enrollment
-      expect(networkClient.experimentsFetchedForUsers, isEmpty);
-    });
+        // The user ID never leaves the device for enrollment
+        expect(networkClient.experimentsFetchedForUsers, isEmpty);
+      },
+    );
 
     test('assignments are sticky - identify() never re-buckets', () async {
       await seedAnonymousId(r'$anon_abc123def456');
@@ -1201,10 +1305,9 @@ void main() {
       expect(MostlyGoodMetrics.getVariant('button-color'), 'treatment');
       await Future<void>.delayed(Duration.zero);
 
-      expect(
-        MostlyGoodMetrics.localExperimentAssignments,
-        {'7b1e8a90-4c2d-4f6a-9e3b-2a1d5c8f0e71': 'treatment'},
-      );
+      expect(MostlyGoodMetrics.localExperimentAssignments, {
+        '7b1e8a90-4c2d-4f6a-9e3b-2a1d5c8f0e71': 'treatment',
+      });
 
       // Simulated restart with the same persisted state storage,
       // identified as a user that would bucket to "control"
@@ -1282,19 +1385,15 @@ void main() {
       expect(await MostlyGoodMetrics.ready(), true);
       expect(MostlyGoodMetrics.getVariant('button-color'), 'treatment');
       await Future<void>.delayed(Duration.zero);
-      expect(
-        MostlyGoodMetrics.localExperimentAssignments,
-        {'7b1e8a90-4c2d-4f6a-9e3b-2a1d5c8f0e71': 'treatment'},
-      );
+      expect(MostlyGoodMetrics.localExperimentAssignments, {
+        '7b1e8a90-4c2d-4f6a-9e3b-2a1d5c8f0e71': 'treatment',
+      });
 
       await MostlyGoodMetrics.resetIdentity(clearAnonymousId: true);
 
       // Assignments are cleared in memory and in storage
       expect(MostlyGoodMetrics.localExperimentAssignments, isEmpty);
-      expect(
-        await stateStorage.getString('localExperimentAssignments'),
-        null,
-      );
+      expect(await stateStorage.getString('localExperimentAssignments'), null);
 
       // Re-bucketing is fresh: the golden-vector user that maps to the
       // other variant now gets "control", not the old sticky "treatment"
@@ -1324,69 +1423,69 @@ void main() {
         'treatment',
         reason: 'A plain resetIdentity() must keep sticky assignments',
       );
-      expect(
-        MostlyGoodMetrics.localExperimentAssignments,
-        {'7b1e8a90-4c2d-4f6a-9e3b-2a1d5c8f0e71': 'treatment'},
-      );
+      expect(MostlyGoodMetrics.localExperimentAssignments, {
+        '7b1e8a90-4c2d-4f6a-9e3b-2a1d5c8f0e71': 'treatment',
+      });
     });
 
-    test('opted out: no config fetch, cached bucketing, no exposures',
-        () async {
-      await seedAnonymousId(r'$anon_abc123def456');
-      networkClient.experimentConfigsToReturn = [buttonColor];
+    test(
+      'opted out: no config fetch, cached bucketing, no exposures',
+      () async {
+        await seedAnonymousId(r'$anon_abc123def456');
+        networkClient.experimentConfigsToReturn = [buttonColor];
 
-      // First run (opted in): fetch and cache the configs, no variant reads
-      await configureLocalSDK();
-      expect(await MostlyGoodMetrics.ready(), true);
-      expect(networkClient.experimentConfigsFetchCount, 1);
+        // First run (opted in): fetch and cache the configs, no variant reads
+        await configureLocalSDK();
+        expect(await MostlyGoodMetrics.ready(), true);
+        expect(networkClient.experimentConfigsFetchCount, 1);
 
-      await MostlyGoodMetrics.optOut();
+        await MostlyGoodMetrics.optOut();
 
-      // Age the configs cache past the ~1h throttle so a fetch would be due
-      final twoHoursAgo = DateTime.now()
-          .subtract(const Duration(hours: 2))
-          .millisecondsSinceEpoch;
-      await stateStorage.setString(
-        'localExperimentConfigsFetchedAt',
-        twoHoursAgo.toString(),
-      );
+        // Age the configs cache past the ~1h throttle so a fetch would be due
+        final twoHoursAgo = DateTime.now()
+            .subtract(const Duration(hours: 2))
+            .millisecondsSinceEpoch;
+        await stateStorage.setString(
+          'localExperimentConfigsFetchedAt',
+          twoHoursAgo.toString(),
+        );
 
-      // Simulated restart while opted out
-      MostlyGoodMetrics.reset();
-      eventStorage = InMemoryEventStorage();
-      await configureLocalSDK();
-      expect(await MostlyGoodMetrics.ready(), true);
+        // Simulated restart while opted out
+        MostlyGoodMetrics.reset();
+        eventStorage = InMemoryEventStorage();
+        await configureLocalSDK();
+        expect(await MostlyGoodMetrics.ready(), true);
 
-      // Zero network while opted out: the due refetch was skipped
-      expect(networkClient.experimentConfigsFetchCount, 1);
+        // Zero network while opted out: the due refetch was skipped
+        expect(networkClient.experimentConfigsFetchCount, 1);
 
-      // Bucketing from the cached configs still works
-      expect(MostlyGoodMetrics.getVariant('button-color'), 'treatment');
-      await Future<void>.delayed(Duration.zero);
+        // Bucketing from the cached configs still works
+        expect(MostlyGoodMetrics.getVariant('button-color'), 'treatment');
+        await Future<void>.delayed(Duration.zero);
 
-      // ...but nothing is recorded: no exposure event, no super property,
-      // and no dedup state
-      final events = await eventStorage.fetchEvents(100);
-      expect(
-        events.where((e) => e.name == r'$experiment_exposure'),
-        isEmpty,
-      );
-      expect(MostlyGoodMetrics.getSuperProperties(), isEmpty);
-      expect(await stateStorage.getString('experimentExposures'), null);
+        // ...but nothing is recorded: no exposure event, no super property,
+        // and no dedup state
+        final events = await eventStorage.fetchEvents(100);
+        expect(events.where((e) => e.name == r'$experiment_exposure'), isEmpty);
+        expect(MostlyGoodMetrics.getSuperProperties(), isEmpty);
+        expect(await stateStorage.getString('experimentExposures'), null);
 
-      // Because no dedup state was recorded, the exposure fires on the
-      // first read after optIn()
-      await MostlyGoodMetrics.optIn();
-      expect(MostlyGoodMetrics.getVariant('button-color'), 'treatment');
-      await Future<void>.delayed(Duration.zero);
+        // Because no dedup state was recorded, the exposure fires on the
+        // first read after optIn()
+        await MostlyGoodMetrics.optIn();
+        expect(MostlyGoodMetrics.getVariant('button-color'), 'treatment');
+        await Future<void>.delayed(Duration.zero);
 
-      final exposures = (await eventStorage.fetchEvents(100))
-          .where((e) => e.name == r'$experiment_exposure')
-          .toList();
-      expect(exposures.length, 1);
-      expect(exposures[0].properties?[r'$experiment_name'], 'button-color');
-      expect(exposures[0].properties?[r'$variant'], 'treatment');
-    });
+        final exposures = (await eventStorage.fetchEvents(
+          100,
+        ))
+            .where((e) => e.name == r'$experiment_exposure')
+            .toList();
+        expect(exposures.length, 1);
+        expect(exposures[0].properties?[r'$experiment_name'], 'button-color');
+        expect(exposures[0].properties?[r'$variant'], 'treatment');
+      },
+    );
   });
 
   group('Privacy - opt-out', () {
@@ -1478,10 +1577,7 @@ void main() {
     });
 
     test('optedOutByDefault starts opted out', () async {
-      await configureSDK(
-        trackLifecycleEvents: true,
-        optedOutByDefault: true,
-      );
+      await configureSDK(trackLifecycleEvents: true, optedOutByDefault: true);
 
       expect(MostlyGoodMetrics.isOptedOut, true);
 
@@ -1504,10 +1600,7 @@ void main() {
     });
 
     test('isOptedOut throws when not configured', () {
-      expect(
-        () => MostlyGoodMetrics.isOptedOut,
-        throwsA(isA<MGMError>()),
-      );
+      expect(() => MostlyGoodMetrics.isOptedOut, throwsA(isA<MGMError>()));
     });
   });
 
@@ -1620,10 +1713,7 @@ void main() {
     });
 
     test('omits device properties from events when disabled', () async {
-      await configureSDK(
-        collectDeviceProperties: false,
-        appVersion: '1.0.0',
-      );
+      await configureSDK(collectDeviceProperties: false, appVersion: '1.0.0');
 
       MostlyGoodMetrics.track('test_event');
 
@@ -1669,9 +1759,7 @@ void main() {
 
   group('A/B Testing - super properties in events', () {
     test('includes experiment super property in tracked events', () async {
-      networkClient.experimentsToReturn = {
-        'button_test': 'blue_button',
-      };
+      networkClient.experimentsToReturn = {'button_test': 'blue_button'};
 
       await configureSDK();
       expect(await MostlyGoodMetrics.ready(), true);
@@ -1685,10 +1773,7 @@ void main() {
 
       final events = await eventStorage.fetchEvents(10);
       final clickEvent = events.firstWhere((e) => e.name == 'button_clicked');
-      expect(
-        clickEvent.properties?[r'$experiment_button_test'],
-        'blue_button',
-      );
+      expect(clickEvent.properties?[r'$experiment_button_test'], 'blue_button');
     });
   });
 }

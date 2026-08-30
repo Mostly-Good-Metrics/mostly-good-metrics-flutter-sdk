@@ -9,6 +9,14 @@ enum MGMExperimentMode {
   local,
 }
 
+/// Supplies properties that are evaluated each time an event is tracked.
+///
+/// Use this for values that may change while the app is running, such as the
+/// current screen, account tier, or feature-flag state. The returned values
+/// override super properties but are overridden by properties passed directly
+/// to [MostlyGoodMetrics.track].
+typedef MGMContextProvider = Map<String, dynamic> Function();
+
 /// An experiment definition used for local (on-device) enrollment.
 class MGMExperimentConfig {
   /// The experiment's unique ID (UUID).
@@ -39,11 +47,7 @@ class MGMExperimentConfig {
 
   /// Converts this experiment config to a JSON map.
   Map<String, dynamic> toJson() {
-    return {
-      'id': id,
-      'name': name,
-      'variants': variants,
-    };
+    return {'id': id, 'name': name, 'variants': variants};
   }
 }
 
@@ -75,6 +79,21 @@ class MGMConfiguration {
 
   /// Whether to automatically track app lifecycle events.
   final bool trackAppLifecycleEvents;
+
+  /// Whether this is an existing installation being migrated to MGM.
+  ///
+  /// When true and no MGM lifecycle state exists yet, the SDK records the
+  /// current [appVersion] without emitting `$app_installed`. Derive this from
+  /// the previous provider's persisted installation marker for each device;
+  /// do not set it globally for a migration release, or genuine new installs
+  /// would be suppressed too.
+  final bool existingInstallation;
+
+  /// Dynamic properties evaluated immediately before each event is tracked.
+  ///
+  /// Precedence is: super properties < context provider < event properties <
+  /// MGM system properties.
+  final MGMContextProvider? contextProvider;
 
   /// How experiment variants are assigned (server-assigned by default).
   final MGMExperimentMode experimentMode;
@@ -112,6 +131,8 @@ class MGMConfiguration {
     this.maxStoredEvents = 10000,
     this.enableDebugLogging = false,
     this.trackAppLifecycleEvents = true,
+    this.existingInstallation = false,
+    this.contextProvider,
     this.experimentMode = MGMExperimentMode.server,
     this.localExperiments,
     this.optedOutByDefault = false,
@@ -131,6 +152,8 @@ class MGMConfiguration {
     int? maxStoredEvents,
     bool? enableDebugLogging,
     bool? trackAppLifecycleEvents,
+    bool? existingInstallation,
+    MGMContextProvider? contextProvider,
     MGMExperimentMode? experimentMode,
     List<MGMExperimentConfig>? localExperiments,
     bool? optedOutByDefault,
@@ -147,6 +170,8 @@ class MGMConfiguration {
       enableDebugLogging: enableDebugLogging ?? this.enableDebugLogging,
       trackAppLifecycleEvents:
           trackAppLifecycleEvents ?? this.trackAppLifecycleEvents,
+      existingInstallation: existingInstallation ?? this.existingInstallation,
+      contextProvider: contextProvider ?? this.contextProvider,
       experimentMode: experimentMode ?? this.experimentMode,
       localExperiments: localExperiments ?? this.localExperiments,
       optedOutByDefault: optedOutByDefault ?? this.optedOutByDefault,
@@ -268,10 +293,7 @@ class EventsPayload {
   final EventContext context;
 
   /// Creates a new events payload.
-  const EventsPayload({
-    required this.events,
-    required this.context,
-  });
+  const EventsPayload({required this.events, required this.context});
 
   /// Converts this payload to a JSON map.
   Map<String, dynamic> toJson() {
@@ -415,8 +437,5 @@ class UserProfile {
   final String? name;
 
   /// Creates a new user profile.
-  const UserProfile({
-    this.email,
-    this.name,
-  });
+  const UserProfile({this.email, this.name});
 }
