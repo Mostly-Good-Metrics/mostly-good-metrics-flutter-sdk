@@ -25,6 +25,7 @@ Documentation: [docs.mostlygoodmetrics.com](https://docs.mostlygoodmetrics.com)
 - [Manual Flush](#manual-flush)
 - [Session Management](#session-management)
 - [Privacy](#privacy)
+- [Apple privacy manifest](#apple-privacy-manifest)
 - [Debug Logging](#debug-logging)
 - [Error Handling](#error-handling)
 - [Framework Integration](#framework-integration)
@@ -533,6 +534,12 @@ await MostlyGoodMetrics.configure(
 ```
 
 Functional fields (platform, OS version, app version) are always sent.
+
+## Apple privacy manifest
+
+This SDK contains no native iOS or macOS code, so it has no privacy manifest of its own. Its minimum versions of `shared_preferences` (`^2.2.3`), `path_provider` (`^2.1.3`), and `device_info_plus` (`^11.1.1`) require Apple plugins that ship privacy manifests.
+
+Declare MGM's data collection in your app's privacy manifest and App Store privacy label. See the [privacy documentation](https://docs.mostlygoodmetrics.com/features/privacy).
 
 ## Debug Logging
 
