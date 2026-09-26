@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/widgets.dart' show AppLifecycleState;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mostly_good_metrics_flutter/mostly_good_metrics_flutter.dart';
 
@@ -601,6 +602,46 @@ void main() {
       expect(count, 0);
     });
 
+    test('removes successful batches by client event ID when supported',
+        () async {
+      final trackingStorage = _TrackingIdEventStorage();
+      await MostlyGoodMetrics.configure(
+        const MGMConfiguration(
+          apiKey: 'test-api-key',
+          trackAppLifecycleEvents: false,
+        ),
+        eventStorage: trackingStorage,
+        stateStorage: stateStorage,
+        networkClient: networkClient,
+      );
+      MostlyGoodMetrics.track('event1');
+
+      await MostlyGoodMetrics.flush();
+
+      expect(trackingStorage.idRemovalCalls, 1);
+      expect(trackingStorage.countRemovalCalls, 0);
+      expect(await trackingStorage.eventCount(), 0);
+    });
+
+    test('keeps count-based custom storage adapters compatible', () async {
+      final countOnlyStorage = _CountOnlyEventStorage();
+      await MostlyGoodMetrics.configure(
+        const MGMConfiguration(
+          apiKey: 'test-api-key',
+          trackAppLifecycleEvents: false,
+        ),
+        eventStorage: countOnlyStorage,
+        stateStorage: stateStorage,
+        networkClient: networkClient,
+      );
+      MostlyGoodMetrics.track('event1');
+
+      await MostlyGoodMetrics.flush();
+
+      expect(countOnlyStorage.lastRemovedCount, 1);
+      expect(await countOnlyStorage.eventCount(), 0);
+    });
+
     test('keeps events on failure', () async {
       await configureSDK();
       MostlyGoodMetrics.track('event1');
@@ -618,6 +659,37 @@ void main() {
       await MostlyGoodMetrics.flush();
 
       expect(networkClient.sentPayloads.length, 0);
+    });
+
+    test('waits for the background event persistence before flushing',
+        () async {
+      final barrierStorage = _BarrierEventStorage();
+      await MostlyGoodMetrics.configure(
+        const MGMConfiguration(
+          apiKey: 'test-api-key',
+          trackAppLifecycleEvents: true,
+        ),
+        eventStorage: barrierStorage,
+        stateStorage: stateStorage,
+        networkClient: networkClient,
+      );
+      await pumpEventQueue();
+
+      barrierStorage.holdNextStore();
+      MostlyGoodMetrics.instance
+          .didChangeAppLifecycleState(AppLifecycleState.paused);
+      await pumpEventQueue();
+
+      expect(networkClient.sentPayloads, isEmpty);
+
+      barrierStorage.releaseStore();
+      await pumpEventQueue(times: 20);
+
+      expect(networkClient.sentPayloads, hasLength(1));
+      expect(
+        networkClient.sentPayloads.single.events.map((event) => event.name),
+        contains(r'$app_backgrounded'),
+      );
     });
   });
 
@@ -1776,4 +1848,64 @@ void main() {
       expect(clickEvent.properties?[r'$experiment_button_test'], 'blue_button');
     });
   });
+}
+
+class _TrackingIdEventStorage extends InMemoryEventStorage {
+  int countRemovalCalls = 0;
+  int idRemovalCalls = 0;
+
+  @override
+  Future<void> removeEvents(int count) {
+    countRemovalCalls++;
+    return super.removeEvents(count);
+  }
+
+  @override
+  Future<void> removeEventsByClientEventId(List<MGMEvent> events) {
+    idRemovalCalls++;
+    return super.removeEventsByClientEventId(events);
+  }
+}
+
+class _CountOnlyEventStorage implements EventStorage {
+  final InMemoryEventStorage _storage = InMemoryEventStorage();
+  int? lastRemovedCount;
+
+  @override
+  Future<void> clear() => _storage.clear();
+
+  @override
+  Future<int> eventCount() => _storage.eventCount();
+
+  @override
+  Future<List<MGMEvent>> fetchEvents(int limit) => _storage.fetchEvents(limit);
+
+  @override
+  Future<void> removeEvents(int count) {
+    lastRemovedCount = count;
+    return _storage.removeEvents(count);
+  }
+
+  @override
+  Future<void> store(MGMEvent event) => _storage.store(event);
+}
+
+class _BarrierEventStorage extends InMemoryEventStorage {
+  Completer<void>? _storeBarrier;
+
+  void holdNextStore() {
+    _storeBarrier = Completer<void>();
+  }
+
+  void releaseStore() {
+    _storeBarrier!.complete();
+    _storeBarrier = null;
+  }
+
+  @override
+  Future<void> store(MGMEvent event) async {
+    final barrier = _storeBarrier;
+    await super.store(event);
+    if (barrier != null) await barrier.future;
+  }
 }

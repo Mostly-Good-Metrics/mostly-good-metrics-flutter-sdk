@@ -38,6 +38,7 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
   StateStorage? _stateStorage;
   NetworkClient? _networkClient;
   Timer? _flushTimer;
+  Future<void>? _latestEventPersistence;
 
   String? _userId;
   String? _anonymousId;
@@ -140,6 +141,7 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
     // Initialize storage
     mgm._eventStorage = eventStorage ??
         FileEventStorage(maxStoredEvents: config.maxStoredEvents);
+    mgm._latestEventPersistence = null;
     mgm._stateStorage = stateStorage ?? PreferencesStateStorage();
     mgm._networkClient = networkClient ?? HttpNetworkClient();
 
@@ -360,7 +362,12 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
       properties: mergedProperties.isEmpty ? null : mergedProperties,
     );
 
-    mgm._eventStorage!.store(event);
+    final persistence = mgm._eventStorage!.store(event);
+    mgm._latestEventPersistence = persistence;
+    // track() is synchronous, so persistence failures cannot be returned to
+    // its caller. Mark the fire-and-forget future as handled while retaining
+    // it for the background lifecycle durability barrier.
+    persistence.ignore();
     MGMLogger.debug('Tracked event: $name');
   }
 
@@ -1247,7 +1254,15 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
 
     switch (result) {
       case SendResult.success:
-        await _eventStorage!.removeEvents(events.length);
+        final eventStorage = _eventStorage!;
+        if (eventStorage is ClientEventIdEventStorage) {
+          await (eventStorage as ClientEventIdEventStorage)
+              .removeEventsByClientEventId(events);
+        } else {
+          // Preserve compatibility with custom adapters that only implement
+          // the original count-based EventStorage contract.
+          await eventStorage.removeEvents(events.length);
+        }
         MGMLogger.debug('Successfully sent ${events.length} events');
         break;
       case SendResult.partialSuccess:
@@ -1264,6 +1279,25 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
         MGMLogger.warning('Rate limited, will retry later');
         break;
     }
+  }
+
+  Future<void> _flushAfterPersistence(
+    Future<void>? persistence,
+  ) async {
+    if (persistence != null) {
+      try {
+        await persistence.timeout(const Duration(milliseconds: 750));
+      } on TimeoutException {
+        MGMLogger.warning(
+          'Timed out waiting for event persistence before background flush',
+        );
+      } catch (error) {
+        MGMLogger.warning(
+          'Event persistence failed before background flush: $error',
+        );
+      }
+    }
+    await _flushEvents();
   }
 
   static void _ensureConfigured() {
@@ -1299,8 +1333,10 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
           if (_config!.trackAppLifecycleEvents) {
             track(r'$app_backgrounded');
           }
-          // Flush events before going to background
-          _flushEvents();
+          // Let the event that triggered this flush reach durable storage
+          // before sending it, without waiting for unrelated later writers.
+          final persistence = _latestEventPersistence;
+          unawaited(_flushAfterPersistence(persistence));
           // Stop flush timer while in background
           _flushTimer?.cancel();
         }

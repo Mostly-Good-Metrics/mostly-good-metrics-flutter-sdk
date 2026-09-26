@@ -362,6 +362,37 @@ void main() {
       expect(json['client_event_id'], '550e8400-e29b-41d4-a716-446655440000');
       expect(json.containsKey('clientEventId'), false);
     });
+
+    test('serializes an empty client event ID for format parity', () {
+      final event = MGMEvent(
+        name: 'legacy_event',
+        clientEventId: '',
+        timestamp: DateTime.utc(2024, 1, 1),
+        platform: 'ios',
+        environment: 'production',
+      );
+
+      expect(event.toJson()['client_event_id'], '');
+    });
+
+    test('hydrates legacy events with fresh client event IDs', () {
+      final json = {
+        'name': 'legacy_event',
+        'timestamp': '2025-12-09T12:00:00.000Z',
+        'platform': 'ios',
+        'environment': 'production',
+      };
+
+      final first = MGMEvent.fromJson(json);
+      final second = MGMEvent.fromJson(json);
+      final empty = MGMEvent.fromJson({...json, 'client_event_id': ''});
+
+      expect(first.clientEventId, isNotEmpty);
+      expect(second.clientEventId, isNotEmpty);
+      expect(second.clientEventId, isNot(first.clientEventId));
+      expect(empty.clientEventId, isNotEmpty);
+      expect(first.toJson()['client_event_id'], first.clientEventId);
+    });
   });
 
   group('EventsPayload', () {

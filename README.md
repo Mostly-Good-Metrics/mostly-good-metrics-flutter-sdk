@@ -328,9 +328,10 @@ The SDK automatically handles common tasks so you can focus on tracking what mat
 - **Anonymous user ID generation** - UUID automatically generated and persisted for anonymous tracking
 - **User ID persistence** - Identity set via `identify()` persists across app launches; falls back to anonymous ID when reset
 - **Event persistence** - Events are saved to local storage and survive app restarts
+- **Responsive persistence** - Native apps coalesce bursts and serialize queued events off the UI isolate
 - **Batch processing** - Events are grouped for efficient network usage
 - **Periodic flush** - Events are sent every 30 seconds (configurable via `flushInterval`)
-- **Background flush** - Events are sent when the app goes to background
+- **Background flush** - Pending persistence is bounded before events are sent when the app goes to background
 - **Retry on failure** - Failed requests are retried; events are preserved until successfully sent
 - **Session management** - New session ID generated on each app launch
 - **Deduplication** - Events include unique IDs (`client_event_id`) to prevent duplicate processing
