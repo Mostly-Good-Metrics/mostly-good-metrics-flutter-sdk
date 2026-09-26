@@ -362,7 +362,12 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
       properties: mergedProperties.isEmpty ? null : mergedProperties,
     );
 
-    mgm._latestEventPersistence = mgm._eventStorage!.store(event);
+    final persistence = mgm._eventStorage!.store(event);
+    mgm._latestEventPersistence = persistence;
+    // track() is synchronous, so persistence failures cannot be returned to
+    // its caller. Mark the fire-and-forget future as handled while retaining
+    // it for the background lifecycle durability barrier.
+    persistence.ignore();
     MGMLogger.debug('Tracked event: $name');
   }
 

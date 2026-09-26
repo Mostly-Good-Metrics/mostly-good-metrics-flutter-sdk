@@ -218,6 +218,7 @@ void main() {
     late Directory documentsDirectory;
 
     setUp(() async {
+      MostlyGoodMetrics.reset();
       documentsDirectory = await Directory.systemTemp.createTemp(
         'mgm-storage-test-',
       );
@@ -231,6 +232,7 @@ void main() {
     });
 
     tearDown(() async {
+      MostlyGoodMetrics.reset();
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(pathProviderChannel, null);
       await documentsDirectory.delete(recursive: true);
@@ -372,32 +374,80 @@ void main() {
       expect(persisted, hasLength(100));
     });
 
-    test('cleans a failed temp write and retries while dirty', () async {
+    test(
+        'backs off failed writes without unhandled errors and recovers while dirty',
+        () async {
       final storage = FileEventStorage(maxStoredEvents: 10000);
-      final file = Directory('${documentsDirectory.path}/mgm_events.json');
-      await file.create();
+      final blockedTarget =
+          Directory('${documentsDirectory.path}/mgm_events.json');
+      await blockedTarget.create();
+      var persistenceAttempts = 0;
+      final watcher = documentsDirectory.watch().listen((event) {
+        if (event.path.endsWith('mgm_events.json.tmp') &&
+            event.type & FileSystemEvent.create != 0) {
+          persistenceAttempts++;
+        }
+      });
+      final unhandledErrors = <Object>[];
+      final persistedFile = File(blockedTarget.path);
+      try {
+        await MostlyGoodMetrics.configure(
+          const MGMConfiguration(
+            apiKey: 'test-api-key',
+            trackAppLifecycleEvents: false,
+            flushInterval: 3600,
+          ),
+          eventStorage: storage,
+          stateStorage: InMemoryStateStorage(),
+          networkClient: MockNetworkClient(),
+        );
 
-      await expectLater(
-        storage.store(createFileEvent(2000)),
-        throwsA(anything),
-      );
-      expect(
-        await File('${documentsDirectory.path}/mgm_events.json.tmp').exists(),
-        false,
-      );
+        await runZonedGuarded(
+          () async {
+            MostlyGoodMetrics.track('write_failure');
+            await Future<void>.delayed(const Duration(seconds: 2));
+          },
+          (error, stackTrace) => unhandledErrors.add(error),
+        );
 
-      await file.delete();
-      final persistedFile = File(file.path);
-      final deadline = DateTime.now().add(const Duration(seconds: 2));
-      while (
-          !await persistedFile.exists() && DateTime.now().isBefore(deadline)) {
-        await Future<void>.delayed(const Duration(milliseconds: 10));
+        expect(unhandledErrors, isEmpty);
+        expect(
+          persistenceAttempts,
+          inInclusiveRange(4, 10),
+          reason: 'Retries should back off instead of running about 53 times',
+        );
+        expect(
+          await File('${documentsDirectory.path}/mgm_events.json.tmp').exists(),
+          false,
+        );
+      } finally {
+        if (await blockedTarget.exists()) await blockedTarget.delete();
+        final deadline = DateTime.now().add(const Duration(seconds: 4));
+        while (!await persistedFile.exists() &&
+            DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        }
+        await watcher.cancel();
       }
 
       expect(await persistedFile.exists(), true);
       final persisted = json.decode(await persistedFile.readAsString()) as List;
       expect(persisted, hasLength(1));
-      expect((persisted.single as Map<String, dynamic>)['name'], 'event_2000');
+      expect(
+        (persisted.single as Map<String, dynamic>)['name'],
+        'write_failure',
+      );
+
+      await storage
+          .store(createFileEvent(2001))
+          .timeout(const Duration(seconds: 1));
+      final afterReset =
+          json.decode(await persistedFile.readAsString()) as List<dynamic>;
+      expect(afterReset, hasLength(2));
+      expect(
+        await File('${documentsDirectory.path}/mgm_events.json.tmp').exists(),
+        false,
+      );
     });
 
     test('assigns IDs while preserving legacy events in a capped flush race',

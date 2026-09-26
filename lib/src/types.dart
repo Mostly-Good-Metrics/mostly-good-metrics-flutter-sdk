@@ -274,7 +274,7 @@ class MGMEvent {
   Map<String, dynamic> toJson() {
     return {
       'name': name,
-      if (clientEventId.isNotEmpty) 'client_event_id': clientEventId,
+      'client_event_id': clientEventId,
       'timestamp': timestamp.toUtc().toIso8601String(),
       if (userId != null) 'user_id': userId,
       if (sessionId != null) 'session_id': sessionId,

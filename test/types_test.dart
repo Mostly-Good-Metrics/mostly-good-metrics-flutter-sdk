@@ -363,6 +363,18 @@ void main() {
       expect(json.containsKey('clientEventId'), false);
     });
 
+    test('serializes an empty client event ID for format parity', () {
+      final event = MGMEvent(
+        name: 'legacy_event',
+        clientEventId: '',
+        timestamp: DateTime.utc(2024, 1, 1),
+        platform: 'ios',
+        environment: 'production',
+      );
+
+      expect(event.toJson()['client_event_id'], '');
+    });
+
     test('hydrates legacy events with fresh client event IDs', () {
       final json = {
         'name': 'legacy_event',

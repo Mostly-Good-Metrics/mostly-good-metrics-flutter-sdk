@@ -56,6 +56,7 @@ class FileEventStorage implements EventStorage, ClientEventIdEventStorage {
   static const String _eventsFileName = 'mgm_events.json';
   static const String _prefsPrefix = 'mgm_';
   static const Duration _persistenceDelay = Duration(milliseconds: 25);
+  static const Duration _maximumPersistenceRetryDelay = Duration(seconds: 2);
   static const int _serializationChunkSize = 2500;
 
   final int _maxStoredEvents;
@@ -69,6 +70,7 @@ class FileEventStorage implements EventStorage, ClientEventIdEventStorage {
   final ListQueue<_PersistenceWaiter> _persistenceWaiters = ListQueue();
   int _revision = 0;
   int _persistedRevision = 0;
+  Duration _nextPersistenceRetryDelay = _persistenceDelay;
 
   FileEventStorage({required int maxStoredEvents})
       : _maxStoredEvents = maxStoredEvents;
@@ -212,22 +214,31 @@ class FileEventStorage implements EventStorage, ClientEventIdEventStorage {
 
   Future<void> _persistUntilCurrent() async {
     _persisting = true;
+    var nextPersistenceDelay = _persistenceDelay;
     try {
       while (_dirty) {
         final revision = _revision;
         final snapshot = List<MGMEvent>.of(_cachedEvents!);
         await _saveSnapshot(snapshot);
+        _nextPersistenceRetryDelay = _persistenceDelay;
         _persistedRevision = revision;
         _dirty = _persistedRevision != _revision;
         _completeWaitersThrough(revision);
       }
     } catch (error, stackTrace) {
       _dirty = true;
+      nextPersistenceDelay = _nextPersistenceRetryDelay;
+      _nextPersistenceRetryDelay = Duration(
+        milliseconds: (_nextPersistenceRetryDelay.inMilliseconds * 2).clamp(
+          _persistenceDelay.inMilliseconds,
+          _maximumPersistenceRetryDelay.inMilliseconds,
+        ),
+      );
       _failWaiters(error, stackTrace);
     } finally {
       _persisting = false;
       if (_dirty && _persistenceTimer == null) {
-        _persistenceTimer = Timer(_persistenceDelay, _startPersistence);
+        _persistenceTimer = Timer(nextPersistenceDelay, _startPersistence);
       }
     }
   }
