@@ -1,12 +1,15 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show compute, kIsWeb;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'logger.dart';
 import 'types.dart';
+
+String _encodeEventMaps(List<Map<String, dynamic>> events) =>
+    json.encode(events);
 
 /// Abstract interface for event storage.
 abstract class EventStorage {
@@ -45,6 +48,7 @@ class FileEventStorage implements EventStorage {
   List<MGMEvent>? _cachedEvents;
   String? _eventsFilePath;
   bool _initialized = false;
+  Future<void> _operationQueue = Future<void>.value();
 
   FileEventStorage({required int maxStoredEvents})
       : _maxStoredEvents = maxStoredEvents;
@@ -108,8 +112,17 @@ class FileEventStorage implements EventStorage {
 
     await _ensureInitialized();
 
-    final eventsJson = json.encode(
-      _cachedEvents!.map((e) => e.toJson()).toList(),
+    // Snapshot before crossing the isolate boundary so later operations cannot
+    // mutate the collection being encoded. `compute` runs this work on a
+    // background isolate on native platforms (and yields asynchronously on
+    // web), keeping a whole-backlog JSON encode out of track()'s UI-isolate
+    // work.
+    final snapshot =
+        _cachedEvents!.map((event) => event.toJson()).toList(growable: false);
+    final eventsJson = await compute(
+      _encodeEventMaps,
+      snapshot,
+      debugLabel: 'MostlyGoodMetrics.encodeEvents',
     );
 
     if (kIsWeb) {
@@ -121,51 +134,70 @@ class FileEventStorage implements EventStorage {
     }
   }
 
-  @override
-  Future<void> store(MGMEvent event) async {
-    final events = await _loadEvents();
-
-    events.add(event);
-
-    // Trim to max stored events (FIFO)
-    while (events.length > _maxStoredEvents) {
-      events.removeAt(0);
-    }
-
-    await _saveEvents();
-    MGMLogger.debug('Stored event: ${event.name}');
+  Future<T> _enqueue<T>(Future<T> Function() operation) {
+    final result = _operationQueue.then((_) => operation());
+    _operationQueue = result.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace __) {},
+    );
+    return result;
   }
 
   @override
-  Future<List<MGMEvent>> fetchEvents(int limit) async {
-    final events = await _loadEvents();
-    final fetchLimit = limit.clamp(0, events.length);
-    return events.take(fetchLimit).toList();
-  }
+  Future<void> store(MGMEvent event) {
+    return _enqueue(() async {
+      final events = await _loadEvents();
 
-  @override
-  Future<void> removeEvents(int count) async {
-    final events = await _loadEvents();
-    final removeCount = count.clamp(0, events.length);
+      events.add(event);
 
-    if (removeCount > 0) {
-      events.removeRange(0, removeCount);
+      // Trim to max stored events (FIFO)
+      while (events.length > _maxStoredEvents) {
+        events.removeAt(0);
+      }
+
       await _saveEvents();
-      MGMLogger.debug('Removed $removeCount events');
-    }
+      MGMLogger.debug('Stored event: ${event.name}');
+    });
   }
 
   @override
-  Future<int> eventCount() async {
-    final events = await _loadEvents();
-    return events.length;
+  Future<List<MGMEvent>> fetchEvents(int limit) {
+    return _enqueue(() async {
+      final events = await _loadEvents();
+      final fetchLimit = limit.clamp(0, events.length);
+      return events.take(fetchLimit).toList();
+    });
   }
 
   @override
-  Future<void> clear() async {
-    _cachedEvents = [];
-    await _saveEvents();
-    MGMLogger.debug('Cleared all events');
+  Future<void> removeEvents(int count) {
+    return _enqueue(() async {
+      final events = await _loadEvents();
+      final removeCount = count.clamp(0, events.length);
+
+      if (removeCount > 0) {
+        events.removeRange(0, removeCount);
+        await _saveEvents();
+        MGMLogger.debug('Removed $removeCount events');
+      }
+    });
+  }
+
+  @override
+  Future<int> eventCount() {
+    return _enqueue(() async {
+      final events = await _loadEvents();
+      return events.length;
+    });
+  }
+
+  @override
+  Future<void> clear() {
+    return _enqueue(() async {
+      _cachedEvents = [];
+      await _saveEvents();
+      MGMLogger.debug('Cleared all events');
+    });
   }
 }
 

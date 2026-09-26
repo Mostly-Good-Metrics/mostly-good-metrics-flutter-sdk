@@ -1,7 +1,13 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mostly_good_metrics_flutter/mostly_good_metrics_flutter.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   group('InMemoryEventStorage', () {
     late InMemoryEventStorage storage;
 
@@ -159,6 +165,74 @@ void main() {
 
       expect(await storage.getString('key1'), 'value1');
       expect(await storage.getString('key2'), 'value2');
+    });
+  });
+
+  group('FileEventStorage', () {
+    const pathProviderChannel = MethodChannel(
+      'plugins.flutter.io/path_provider',
+    );
+    late Directory documentsDirectory;
+
+    setUp(() async {
+      documentsDirectory = await Directory.systemTemp.createTemp(
+        'mgm-storage-test-',
+      );
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(pathProviderChannel, (call) async {
+        if (call.method == 'getApplicationDocumentsDirectory') {
+          return documentsDirectory.path;
+        }
+        return null;
+      });
+    });
+
+    tearDown(() async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(pathProviderChannel, null);
+      await documentsDirectory.delete(recursive: true);
+    });
+
+    MGMEvent createFileEvent(int index) => MGMEvent(
+          name: 'event_$index',
+          clientEventId:
+              '550e8400-e29b-41d4-a716-${index.toString().padLeft(12, '0')}',
+          timestamp: DateTime.utc(2026, 9, 25, 12, 34, 56, index),
+          platform: 'test',
+          environment: 'test',
+          properties: {'index': index},
+        );
+
+    test('serializes concurrent stores without losing events', () async {
+      final storage = FileEventStorage(maxStoredEvents: 10000);
+
+      await Future.wait([
+        for (var index = 0; index < 100; index++)
+          storage.store(createFileEvent(index)),
+      ]);
+
+      final stored = await storage.fetchEvents(100);
+      expect(stored.map((event) => event.name), [
+        for (var index = 0; index < 100; index++) 'event_$index',
+      ]);
+
+      final file = File('${documentsDirectory.path}/mgm_events.json');
+      final persisted = json.decode(await file.readAsString()) as List<dynamic>;
+      expect(persisted, hasLength(100));
+      expect(
+        persisted.map((event) => (event as Map<String, dynamic>)['name']),
+        [for (var index = 0; index < 100; index++) 'event_$index'],
+      );
+    });
+
+    test('preserves the existing JSON array format', () async {
+      final storage = FileEventStorage(maxStoredEvents: 10000);
+      await storage.store(createFileEvent(1));
+
+      final file = File('${documentsDirectory.path}/mgm_events.json');
+      final persisted = json.decode(await file.readAsString()) as List<dynamic>;
+
+      expect(persisted.single, createFileEvent(1).toJson());
     });
   });
 }
