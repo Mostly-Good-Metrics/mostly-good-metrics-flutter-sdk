@@ -44,6 +44,7 @@ export 'src/types.dart'
 export 'src/storage.dart'
     show
         EventStorage,
+        ClientEventIdEventStorage,
         StateStorage,
         FileEventStorage,
         PreferencesStateStorage,

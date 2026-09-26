@@ -187,6 +187,8 @@ class MGMEvent {
   final String name;
 
   /// Unique client-generated ID for deduplication.
+  ///
+  /// Empty only for events restored from SDK versions that predate event IDs.
   final String clientEventId;
 
   /// The timestamp when the event occurred.
@@ -247,7 +249,7 @@ class MGMEvent {
   factory MGMEvent.fromJson(Map<String, dynamic> json) {
     return MGMEvent(
       name: json['name'] as String,
-      clientEventId: json['client_event_id'] as String,
+      clientEventId: json['client_event_id'] as String? ?? '',
       timestamp: DateTime.parse(json['timestamp'] as String),
       userId: json['user_id'] as String?,
       sessionId: json['session_id'] as String?,
@@ -267,7 +269,7 @@ class MGMEvent {
   Map<String, dynamic> toJson() {
     return {
       'name': name,
-      'client_event_id': clientEventId,
+      if (clientEventId.isNotEmpty) 'client_event_id': clientEventId,
       'timestamp': timestamp.toUtc().toIso8601String(),
       if (userId != null) 'user_id': userId,
       if (sessionId != null) 'session_id': sessionId,

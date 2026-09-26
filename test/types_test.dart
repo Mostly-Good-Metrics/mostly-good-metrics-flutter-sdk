@@ -362,6 +362,20 @@ void main() {
       expect(json['client_event_id'], '550e8400-e29b-41d4-a716-446655440000');
       expect(json.containsKey('clientEventId'), false);
     });
+
+    test('roundtrips legacy events without a client event ID', () {
+      final json = {
+        'name': 'legacy_event',
+        'timestamp': '2025-12-09T12:00:00.000Z',
+        'platform': 'ios',
+        'environment': 'production',
+      };
+
+      final event = MGMEvent.fromJson(json);
+
+      expect(event.clientEventId, isEmpty);
+      expect(event.toJson(), json);
+    });
   });
 
   group('EventsPayload', () {

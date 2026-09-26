@@ -129,6 +129,48 @@ void main() {
       await storage.removeEvents(0);
       expect(await storage.eventCount(), 1);
     });
+
+    test('does not remove unsent events after FIFO trimming', () async {
+      final limitedStorage = InMemoryEventStorage(maxStoredEvents: 3);
+      await limitedStorage.store(createTestEvent('event1'));
+      await limitedStorage.store(createTestEvent('event2'));
+      await limitedStorage.store(createTestEvent('event3'));
+
+      final sentEvents = await limitedStorage.fetchEvents(2);
+      await limitedStorage.store(createTestEvent('event4'));
+      await limitedStorage.removeEventsByClientEventId(sentEvents);
+
+      expect(
+        (await limitedStorage.fetchEvents(3)).map((event) => event.name),
+        ['event3', 'event4'],
+      );
+    });
+
+    test('removes only the supplied ID-less legacy events', () async {
+      final sentLegacyEvent = MGMEvent(
+        name: 'sent_legacy',
+        clientEventId: '',
+        timestamp: DateTime.utc(2025, 12, 9),
+        platform: 'test',
+        environment: 'test',
+      );
+      final unsentLegacyEvent = MGMEvent(
+        name: 'unsent_legacy',
+        clientEventId: '',
+        timestamp: DateTime.utc(2025, 12, 9),
+        platform: 'test',
+        environment: 'test',
+      );
+      await storage.store(sentLegacyEvent);
+      await storage.store(unsentLegacyEvent);
+
+      await storage.removeEventsByClientEventId([sentLegacyEvent]);
+
+      expect(
+        (await storage.fetchEvents(2)).map((event) => event.name),
+        ['unsent_legacy'],
+      );
+    });
   });
 
   group('InMemoryStateStorage', () {
@@ -206,22 +248,31 @@ void main() {
     test('serializes concurrent stores without losing events', () async {
       final storage = FileEventStorage(maxStoredEvents: 10000);
 
-      await Future.wait([
+      final stores = [
         for (var index = 0; index < 100; index++)
           storage.store(createFileEvent(index)),
-      ]);
+      ];
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+
+      final file = File('${documentsDirectory.path}/mgm_events.json');
+      expect(await file.exists(), false);
+
+      await Future.wait(stores);
 
       final stored = await storage.fetchEvents(100);
       expect(stored.map((event) => event.name), [
         for (var index = 0; index < 100; index++) 'event_$index',
       ]);
 
-      final file = File('${documentsDirectory.path}/mgm_events.json');
       final persisted = json.decode(await file.readAsString()) as List<dynamic>;
       expect(persisted, hasLength(100));
       expect(
         persisted.map((event) => (event as Map<String, dynamic>)['name']),
         [for (var index = 0; index < 100; index++) 'event_$index'],
+      );
+      expect(
+        await File('${documentsDirectory.path}/mgm_events.json.tmp').exists(),
+        false,
       );
     });
 
@@ -233,6 +284,61 @@ void main() {
       final persisted = json.decode(await file.readAsString()) as List<dynamic>;
 
       expect(persisted.single, createFileEvent(1).toJson());
+    });
+
+    test('preserves JSON format across serialization chunks', () async {
+      final storage = FileEventStorage(maxStoredEvents: 10000);
+      await Future.wait([
+        for (var index = 0; index < 2501; index++)
+          storage.store(createFileEvent(index)),
+      ]);
+
+      final file = File('${documentsDirectory.path}/mgm_events.json');
+      final persisted = json.decode(await file.readAsString()) as List<dynamic>;
+
+      expect(persisted, hasLength(2501));
+      expect((persisted.first as Map<String, dynamic>)['name'], 'event_0');
+      expect((persisted.last as Map<String, dynamic>)['name'], 'event_2500');
+    });
+
+    test('serves live events while a coalesced write is pending', () async {
+      final storage = FileEventStorage(maxStoredEvents: 10000);
+      await storage.store(createFileEvent(1));
+
+      final pendingStore = storage.store(createFileEvent(2));
+
+      expect(await storage.eventCount(), 2);
+      expect(
+        (await storage.fetchEvents(2)).map((event) => event.name),
+        ['event_1', 'event_2'],
+      );
+      await pendingStore;
+    });
+
+    test('preserves unsent legacy events across a capped flush race', () async {
+      final legacyEvents = [
+        for (var index = 1; index <= 3; index++)
+          createFileEvent(index).toJson()..remove('client_event_id'),
+      ];
+      final file = File('${documentsDirectory.path}/mgm_events.json');
+      await file.writeAsString(json.encode(legacyEvents));
+      final storage = FileEventStorage(maxStoredEvents: 3);
+
+      final sentEvents = await storage.fetchEvents(2);
+      await storage.store(createFileEvent(4));
+      await storage.removeEventsByClientEventId(sentEvents);
+
+      final remaining = await storage.fetchEvents(3);
+      expect(remaining.map((event) => event.name), ['event_3', 'event_4']);
+      expect(remaining.first.clientEventId, isEmpty);
+
+      final persisted = json.decode(await file.readAsString()) as List<dynamic>;
+      expect(persisted, hasLength(2));
+      expect(
+        (persisted.first as Map<String, dynamic>)
+            .containsKey('client_event_id'),
+        false,
+      );
     });
   });
 }

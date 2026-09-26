@@ -601,6 +601,46 @@ void main() {
       expect(count, 0);
     });
 
+    test('removes successful batches by client event ID when supported',
+        () async {
+      final trackingStorage = _TrackingIdEventStorage();
+      await MostlyGoodMetrics.configure(
+        const MGMConfiguration(
+          apiKey: 'test-api-key',
+          trackAppLifecycleEvents: false,
+        ),
+        eventStorage: trackingStorage,
+        stateStorage: stateStorage,
+        networkClient: networkClient,
+      );
+      MostlyGoodMetrics.track('event1');
+
+      await MostlyGoodMetrics.flush();
+
+      expect(trackingStorage.idRemovalCalls, 1);
+      expect(trackingStorage.countRemovalCalls, 0);
+      expect(await trackingStorage.eventCount(), 0);
+    });
+
+    test('keeps count-based custom storage adapters compatible', () async {
+      final countOnlyStorage = _CountOnlyEventStorage();
+      await MostlyGoodMetrics.configure(
+        const MGMConfiguration(
+          apiKey: 'test-api-key',
+          trackAppLifecycleEvents: false,
+        ),
+        eventStorage: countOnlyStorage,
+        stateStorage: stateStorage,
+        networkClient: networkClient,
+      );
+      MostlyGoodMetrics.track('event1');
+
+      await MostlyGoodMetrics.flush();
+
+      expect(countOnlyStorage.lastRemovedCount, 1);
+      expect(await countOnlyStorage.eventCount(), 0);
+    });
+
     test('keeps events on failure', () async {
       await configureSDK();
       MostlyGoodMetrics.track('event1');
@@ -1776,4 +1816,44 @@ void main() {
       expect(clickEvent.properties?[r'$experiment_button_test'], 'blue_button');
     });
   });
+}
+
+class _TrackingIdEventStorage extends InMemoryEventStorage {
+  int countRemovalCalls = 0;
+  int idRemovalCalls = 0;
+
+  @override
+  Future<void> removeEvents(int count) {
+    countRemovalCalls++;
+    return super.removeEvents(count);
+  }
+
+  @override
+  Future<void> removeEventsByClientEventId(List<MGMEvent> events) {
+    idRemovalCalls++;
+    return super.removeEventsByClientEventId(events);
+  }
+}
+
+class _CountOnlyEventStorage implements EventStorage {
+  final InMemoryEventStorage _storage = InMemoryEventStorage();
+  int? lastRemovedCount;
+
+  @override
+  Future<void> clear() => _storage.clear();
+
+  @override
+  Future<int> eventCount() => _storage.eventCount();
+
+  @override
+  Future<List<MGMEvent>> fetchEvents(int limit) => _storage.fetchEvents(limit);
+
+  @override
+  Future<void> removeEvents(int count) {
+    lastRemovedCount = count;
+    return _storage.removeEvents(count);
+  }
+
+  @override
+  Future<void> store(MGMEvent event) => _storage.store(event);
 }

@@ -1247,7 +1247,15 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
 
     switch (result) {
       case SendResult.success:
-        await _eventStorage!.removeEvents(events.length);
+        final eventStorage = _eventStorage!;
+        if (eventStorage is ClientEventIdEventStorage) {
+          await (eventStorage as ClientEventIdEventStorage)
+              .removeEventsByClientEventId(events);
+        } else {
+          // Preserve compatibility with custom adapters that only implement
+          // the original count-based EventStorage contract.
+          await eventStorage.removeEvents(events.length);
+        }
         MGMLogger.debug('Successfully sent ${events.length} events');
         break;
       case SendResult.partialSuccess:
