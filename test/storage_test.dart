@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -315,7 +316,92 @@ void main() {
       await pendingStore;
     });
 
-    test('preserves unsent legacy events across a capped flush race', () async {
+    test('keeps persisting across the two-event timer boundary', () async {
+      final file = File('${documentsDirectory.path}/mgm_events.json');
+      var eventIndex = 100;
+
+      for (final gap in [24, 26, 28, 30]) {
+        if (await file.exists()) await file.delete();
+        final storage = FileEventStorage(maxStoredEvents: 10000);
+
+        final first = storage.store(createFileEvent(eventIndex++));
+        await Future<void>.delayed(Duration(milliseconds: gap));
+        final second = storage.store(createFileEvent(eventIndex++));
+        await Future.wait([first, second]).timeout(const Duration(seconds: 2));
+
+        // Let any trailing timer fire before proving the next mutation can
+        // still reach disk and complete.
+        await Future<void>.delayed(const Duration(milliseconds: 60));
+        await storage
+            .store(createFileEvent(eventIndex++))
+            .timeout(const Duration(seconds: 2));
+
+        final persisted = json.decode(await file.readAsString()) as List;
+        expect(persisted, hasLength(3), reason: 'gap=${gap}ms');
+      }
+    });
+
+    test('persists during sustained tracking instead of waiting for quiet',
+        () async {
+      final storage = FileEventStorage(maxStoredEvents: 10000);
+      final file = File('${documentsDirectory.path}/mgm_events.json');
+      final stores = <Future<void>>[];
+      final producerDone = Completer<void>();
+      var index = 0;
+
+      final producer =
+          Timer.periodic(const Duration(milliseconds: 10), (timer) {
+        stores.add(storage.store(createFileEvent(1000 + index)));
+        index++;
+        if (index == 100) {
+          timer.cancel();
+          producerDone.complete();
+        }
+      });
+
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      expect(producer.isActive, true);
+      expect(await file.exists(), true);
+      final midstream = json.decode(await file.readAsString()) as List;
+      expect(midstream, isNotEmpty);
+      expect(midstream.length, lessThan(100));
+
+      await producerDone.future;
+      await Future.wait(stores).timeout(const Duration(seconds: 3));
+      final persisted = json.decode(await file.readAsString()) as List;
+      expect(persisted, hasLength(100));
+    });
+
+    test('cleans a failed temp write and retries while dirty', () async {
+      final storage = FileEventStorage(maxStoredEvents: 10000);
+      final file = Directory('${documentsDirectory.path}/mgm_events.json');
+      await file.create();
+
+      await expectLater(
+        storage.store(createFileEvent(2000)),
+        throwsA(anything),
+      );
+      expect(
+        await File('${documentsDirectory.path}/mgm_events.json.tmp').exists(),
+        false,
+      );
+
+      await file.delete();
+      final persistedFile = File(file.path);
+      final deadline = DateTime.now().add(const Duration(seconds: 2));
+      while (
+          !await persistedFile.exists() && DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+
+      expect(await persistedFile.exists(), true);
+      final persisted = json.decode(await persistedFile.readAsString()) as List;
+      expect(persisted, hasLength(1));
+      expect((persisted.single as Map<String, dynamic>)['name'], 'event_2000');
+    });
+
+    test('assigns IDs while preserving legacy events in a capped flush race',
+        () async {
       final legacyEvents = [
         for (var index = 1; index <= 3; index++)
           createFileEvent(index).toJson()..remove('client_event_id'),
@@ -330,14 +416,14 @@ void main() {
 
       final remaining = await storage.fetchEvents(3);
       expect(remaining.map((event) => event.name), ['event_3', 'event_4']);
-      expect(remaining.first.clientEventId, isEmpty);
+      expect(remaining.first.clientEventId, isNotEmpty);
 
       final persisted = json.decode(await file.readAsString()) as List<dynamic>;
       expect(persisted, hasLength(2));
       expect(
         (persisted.first as Map<String, dynamic>)
             .containsKey('client_event_id'),
-        false,
+        true,
       );
     });
   });

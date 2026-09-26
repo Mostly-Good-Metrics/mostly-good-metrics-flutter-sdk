@@ -38,6 +38,7 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
   StateStorage? _stateStorage;
   NetworkClient? _networkClient;
   Timer? _flushTimer;
+  Future<void>? _latestEventPersistence;
 
   String? _userId;
   String? _anonymousId;
@@ -140,6 +141,7 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
     // Initialize storage
     mgm._eventStorage = eventStorage ??
         FileEventStorage(maxStoredEvents: config.maxStoredEvents);
+    mgm._latestEventPersistence = null;
     mgm._stateStorage = stateStorage ?? PreferencesStateStorage();
     mgm._networkClient = networkClient ?? HttpNetworkClient();
 
@@ -360,7 +362,7 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
       properties: mergedProperties.isEmpty ? null : mergedProperties,
     );
 
-    mgm._eventStorage!.store(event);
+    mgm._latestEventPersistence = mgm._eventStorage!.store(event);
     MGMLogger.debug('Tracked event: $name');
   }
 
@@ -1274,6 +1276,25 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _flushAfterPersistence(
+    Future<void>? persistence,
+  ) async {
+    if (persistence != null) {
+      try {
+        await persistence.timeout(const Duration(milliseconds: 750));
+      } on TimeoutException {
+        MGMLogger.warning(
+          'Timed out waiting for event persistence before background flush',
+        );
+      } catch (error) {
+        MGMLogger.warning(
+          'Event persistence failed before background flush: $error',
+        );
+      }
+    }
+    await _flushEvents();
+  }
+
   static void _ensureConfigured() {
     if (!_isConfigured) {
       throw const MGMError(
@@ -1307,8 +1328,10 @@ class MostlyGoodMetrics with WidgetsBindingObserver {
           if (_config!.trackAppLifecycleEvents) {
             track(r'$app_backgrounded');
           }
-          // Flush events before going to background
-          _flushEvents();
+          // Let the event that triggered this flush reach durable storage
+          // before sending it, without waiting for unrelated later writers.
+          final persistence = _latestEventPersistence;
+          unawaited(_flushAfterPersistence(persistence));
           // Stop flush timer while in background
           _flushTimer?.cancel();
         }

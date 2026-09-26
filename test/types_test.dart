@@ -363,7 +363,7 @@ void main() {
       expect(json.containsKey('clientEventId'), false);
     });
 
-    test('roundtrips legacy events without a client event ID', () {
+    test('hydrates legacy events with fresh client event IDs', () {
       final json = {
         'name': 'legacy_event',
         'timestamp': '2025-12-09T12:00:00.000Z',
@@ -371,10 +371,15 @@ void main() {
         'environment': 'production',
       };
 
-      final event = MGMEvent.fromJson(json);
+      final first = MGMEvent.fromJson(json);
+      final second = MGMEvent.fromJson(json);
+      final empty = MGMEvent.fromJson({...json, 'client_event_id': ''});
 
-      expect(event.clientEventId, isEmpty);
-      expect(event.toJson(), json);
+      expect(first.clientEventId, isNotEmpty);
+      expect(second.clientEventId, isNotEmpty);
+      expect(second.clientEventId, isNot(first.clientEventId));
+      expect(empty.clientEventId, isNotEmpty);
+      expect(first.toJson()['client_event_id'], first.clientEventId);
     });
   });
 

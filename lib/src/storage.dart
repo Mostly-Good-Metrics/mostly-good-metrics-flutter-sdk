@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 
@@ -63,8 +64,9 @@ class FileEventStorage implements EventStorage, ClientEventIdEventStorage {
   String? _eventsFilePath;
   bool _initialized = false;
   Timer? _persistenceTimer;
-  Future<void>? _activePersistence;
-  Completer<void>? _pendingPersistence;
+  bool _persisting = false;
+  bool _dirty = false;
+  final ListQueue<_PersistenceWaiter> _persistenceWaiters = ListQueue();
   int _revision = 0;
   int _persistedRevision = 0;
 
@@ -150,8 +152,9 @@ class FileEventStorage implements EventStorage, ClientEventIdEventStorage {
     } else {
       final file = File(_eventsFilePath!);
       final temporaryFile = File('${file.path}.tmp');
-      final sink = temporaryFile.openWrite();
+      IOSink? sink;
       try {
+        sink = temporaryFile.openWrite();
         sink.write('[');
         for (var start = 0;
             start < snapshot.length;
@@ -168,58 +171,80 @@ class FileEventStorage implements EventStorage, ClientEventIdEventStorage {
         }
         sink.write(']');
         await sink.flush();
-      } finally {
         await sink.close();
+        sink = null;
+        await temporaryFile.rename(file.path);
+      } catch (_) {
+        if (sink != null) {
+          try {
+            await sink.close();
+          } catch (_) {
+            // Preserve the original persistence error.
+          }
+        }
+        if (await temporaryFile.exists()) {
+          await temporaryFile.delete();
+        }
+        rethrow;
       }
-      await temporaryFile.rename(file.path);
     }
   }
 
   Future<void> _schedulePersistence() {
     _revision++;
-    final pending = _pendingPersistence ??= Completer<void>();
+    _dirty = true;
+    final pending = Completer<void>();
+    _persistenceWaiters.add(_PersistenceWaiter(_revision, pending));
 
-    _persistenceTimer?.cancel();
-    _persistenceTimer = Timer(_persistenceDelay, _startPersistence);
+    if (_persistenceTimer == null && !_persisting) {
+      _persistenceTimer = Timer(_persistenceDelay, _startPersistence);
+    }
 
     return pending.future;
   }
 
   void _startPersistence() {
     _persistenceTimer = null;
-    if (_activePersistence != null) return;
+    if (_persisting || !_dirty) return;
 
-    final persistence = _persistUntilCurrent();
-    _activePersistence = persistence;
+    unawaited(_persistUntilCurrent());
   }
 
   Future<void> _persistUntilCurrent() async {
+    _persisting = true;
     try {
-      while (_persistedRevision != _revision) {
+      while (_dirty) {
         final revision = _revision;
         final snapshot = List<MGMEvent>.of(_cachedEvents!);
         await _saveSnapshot(snapshot);
         _persistedRevision = revision;
+        _dirty = _persistedRevision != _revision;
+        _completeWaitersThrough(revision);
       }
-
-      final pending = _pendingPersistence;
-      _pendingPersistence = null;
-      pending?.complete();
     } catch (error, stackTrace) {
-      final pending = _pendingPersistence;
-      _pendingPersistence = null;
-      pending?.completeError(error, stackTrace);
+      _dirty = true;
+      _failWaiters(error, stackTrace);
     } finally {
-      _activePersistence = null;
-
-      // A timer that fired during the write delegates the newer revision to
-      // this loop. Schedule a retry only if a mutation landed after the loop
-      // completed but before cleanup.
-      if (_pendingPersistence != null &&
-          _persistedRevision != _revision &&
-          _persistenceTimer == null) {
+      _persisting = false;
+      if (_dirty && _persistenceTimer == null) {
         _persistenceTimer = Timer(_persistenceDelay, _startPersistence);
       }
+    }
+  }
+
+  void _completeWaitersThrough(int revision) {
+    while (_persistenceWaiters.isNotEmpty &&
+        _persistenceWaiters.first.revision <= revision) {
+      _persistenceWaiters.removeFirst().completer.complete();
+    }
+  }
+
+  void _failWaiters(Object error, StackTrace stackTrace) {
+    while (_persistenceWaiters.isNotEmpty) {
+      _persistenceWaiters
+          .removeFirst()
+          .completer
+          .completeError(error, stackTrace);
     }
   }
 
@@ -299,6 +324,13 @@ class FileEventStorage implements EventStorage, ClientEventIdEventStorage {
     MGMLogger.debug('Cleared all events');
     await persistence;
   }
+}
+
+class _PersistenceWaiter {
+  final int revision;
+  final Completer<void> completer;
+
+  _PersistenceWaiter(this.revision, this.completer);
 }
 
 /// SharedPreferences-based state storage implementation.

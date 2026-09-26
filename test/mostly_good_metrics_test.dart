@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/widgets.dart' show AppLifecycleState;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mostly_good_metrics_flutter/mostly_good_metrics_flutter.dart';
 
@@ -658,6 +659,37 @@ void main() {
       await MostlyGoodMetrics.flush();
 
       expect(networkClient.sentPayloads.length, 0);
+    });
+
+    test('waits for the background event persistence before flushing',
+        () async {
+      final barrierStorage = _BarrierEventStorage();
+      await MostlyGoodMetrics.configure(
+        const MGMConfiguration(
+          apiKey: 'test-api-key',
+          trackAppLifecycleEvents: true,
+        ),
+        eventStorage: barrierStorage,
+        stateStorage: stateStorage,
+        networkClient: networkClient,
+      );
+      await pumpEventQueue();
+
+      barrierStorage.holdNextStore();
+      MostlyGoodMetrics.instance
+          .didChangeAppLifecycleState(AppLifecycleState.paused);
+      await pumpEventQueue();
+
+      expect(networkClient.sentPayloads, isEmpty);
+
+      barrierStorage.releaseStore();
+      await pumpEventQueue(times: 20);
+
+      expect(networkClient.sentPayloads, hasLength(1));
+      expect(
+        networkClient.sentPayloads.single.events.map((event) => event.name),
+        contains(r'$app_backgrounded'),
+      );
     });
   });
 
@@ -1856,4 +1888,24 @@ class _CountOnlyEventStorage implements EventStorage {
 
   @override
   Future<void> store(MGMEvent event) => _storage.store(event);
+}
+
+class _BarrierEventStorage extends InMemoryEventStorage {
+  Completer<void>? _storeBarrier;
+
+  void holdNextStore() {
+    _storeBarrier = Completer<void>();
+  }
+
+  void releaseStore() {
+    _storeBarrier!.complete();
+    _storeBarrier = null;
+  }
+
+  @override
+  Future<void> store(MGMEvent event) async {
+    final barrier = _storeBarrier;
+    await super.store(event);
+    if (barrier != null) await barrier.future;
+  }
 }

@@ -1,3 +1,5 @@
+import 'utils.dart';
+
 /// How experiment variants are assigned.
 enum MGMExperimentMode {
   /// Variants are assigned by the MostlyGoodMetrics server (default).
@@ -247,9 +249,12 @@ class MGMEvent {
 
   /// Creates an event from a JSON map.
   factory MGMEvent.fromJson(Map<String, dynamic> json) {
+    final storedClientEventId = json['client_event_id'] as String?;
     return MGMEvent(
       name: json['name'] as String,
-      clientEventId: json['client_event_id'] as String? ?? '',
+      clientEventId: storedClientEventId == null || storedClientEventId.isEmpty
+          ? MGMUtils.generateUUID()
+          : storedClientEventId,
       timestamp: DateTime.parse(json['timestamp'] as String),
       userId: json['user_id'] as String?,
       sessionId: json['session_id'] as String?,
